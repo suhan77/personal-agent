@@ -83,8 +83,8 @@ class FileCreatingFakeModel(FakeListChatModel):
                 }],
             )
         tool_result = next(message for message in reversed(messages) if isinstance(message, ToolMessage))
-        if not tool_result.content.endswith("note.txt"):
-            raise AssertionError("Created file path was not returned to the model")
+        if "적용했습니다" not in tool_result.content:
+            raise AssertionError("Approval result was not returned to the model")
         return AIMessage(content="note.txt 파일을 만들었습니다.")
 
 
@@ -93,7 +93,67 @@ class FileCreatingFakeModels(FakeModels):
         self.model = FileCreatingFakeModel()
 
 
+class FileUpdatingFakeModel(FakeListChatModel):
+    _calls: int = PrivateAttr(default=0)
+
+    def __init__(self) -> None:
+        super().__init__(responses=[])
+
+    async def ainvoke(self, messages, *args, **kwargs):
+        self._calls += 1
+        if self._calls == 1:
+            return AIMessage(content="", tool_calls=[{
+                "name": "update_file", "args": {"path": "note.txt", "old_text": "old", "new_text": "new"}, "id": "edit_1"
+            }])
+        return AIMessage(content="변경 검토가 끝났습니다.")
+
+
+class FileUpdatingFakeModels(FakeModels):
+    def __init__(self, *args) -> None:
+        self.model = FileUpdatingFakeModel()
+
+
 class AgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_update_requires_approval_and_reject_does_not_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "note.txt"
+            target.write_text("old", encoding="utf-8")
+            async with open_checkpointer(root / "checkpoints.sqlite") as saver:
+                service = AgentService(FileUpdatingFakeModels(), saver)
+                proposal = await service.run(AgentRequest(message="바꿔줘", working_directory=str(root)))
+                self.assertEqual(proposal["type"], "file_edit_proposal")
+                self.assertIn("+new", proposal["diff"])
+                self.assertEqual(target.read_text(), "old")
+                await service.resume(proposal["conversation_id"], "reject")
+                self.assertEqual(target.read_text(), "old")
+
+    async def test_update_rejects_stale_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "note.txt"
+            target.write_text("old", encoding="utf-8")
+            async with open_checkpointer(root / "checkpoints.sqlite") as saver:
+                service = AgentService(FileUpdatingFakeModels(), saver)
+                proposal = await service.run(AgentRequest(message="바꿔줘", working_directory=str(root)))
+                target.write_text("external edit", encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "changed after review"):
+                    await service.resume(proposal["conversation_id"], "approve")
+                self.assertEqual(target.read_text(), "external edit")
+
+    async def test_update_applies_only_after_approval(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            target = root / "note.txt"
+            target.write_text("old", encoding="utf-8")
+            async with open_checkpointer(root / "checkpoints.sqlite") as saver:
+                service = AgentService(FileUpdatingFakeModels(), saver)
+                proposal = await service.run(AgentRequest(message="바꿔줘", working_directory=str(root)))
+                self.assertEqual(target.read_text(), "old")
+                result = await service.resume(proposal["conversation_id"], "approve")
+                self.assertEqual(result.answer, "변경 검토가 끝났습니다.")
+                self.assertEqual(target.read_text(), "new")
+
     async def test_history_isolation_and_persistence(self):
         first, second = uuid4(), uuid4()
         with tempfile.TemporaryDirectory() as directory:
@@ -138,8 +198,11 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                     message="note.txt 파일을 만들어줘",
                     working_directory=str(working_directory),
                 ))
+                self.assertEqual(response["type"], "file_edit_proposal")
+                self.assertFalse((working_directory / "note.txt").exists())
+                final = await service.resume(response["conversation_id"], "approve")
 
-            self.assertEqual(response.answer, "note.txt 파일을 만들었습니다.")
+            self.assertEqual(final.answer, "note.txt 파일을 만들었습니다.")
             self.assertEqual((working_directory / "note.txt").read_text(), "테스트 내용")
             self.assertEqual(models.model._calls, 2)
 

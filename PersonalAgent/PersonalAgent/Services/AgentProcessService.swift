@@ -7,7 +7,7 @@ final class AgentProcessService {
     private var input: FileHandle?
     private var output: FileHandle?
     private var buffer = Data()
-    private var pending: CheckedContinuation<String, Error>?
+    private var pending: CheckedContinuation<AgentResult, Error>?
     private var requestID: String?
     private var timeout: Task<Void, Never>?
 
@@ -16,6 +16,14 @@ final class AgentProcessService {
         let type: String
         let answer: String?
         let error: String?
+        let path: String?
+        let diff: String?
+        let operation: String?
+    }
+
+    enum AgentResult {
+        case answer(String)
+        case proposal(FileEditProposal)
     }
 
     private struct Request: Encodable {
@@ -30,6 +38,13 @@ final class AgentProcessService {
         let id: String
         let type = "delete_conversation"
         let conversation_id: String
+    }
+
+    private struct ReviewRequest: Encodable {
+        let id: String
+        let type = "review_file_change"
+        let conversation_id: String
+        let decision: String
     }
 
     struct AgentFailure: LocalizedError {
@@ -48,7 +63,7 @@ final class AgentProcessService {
         }
     }
 
-    func reply(to message: String, conversationID: UUID, workingDirectory: URL?) async throws -> String {
+    func reply(to message: String, conversationID: UUID, workingDirectory: URL?) async throws -> AgentResult {
         guard pending == nil else { throw AgentFailure(message: "답변 생성 중입니다.") }
         try startIfNeeded()
         let id = UUID().uuidString
@@ -71,6 +86,24 @@ final class AgentProcessService {
             } catch {
                 stop(reason: "에이전트에 요청을 전달하지 못했습니다: \(error.localizedDescription)")
             }
+        }
+    }
+
+    func review(conversationID: UUID, approve: Bool) async throws -> AgentResult {
+        guard pending == nil else { throw AgentFailure(message: "답변 생성 중입니다.") }
+        try startIfNeeded()
+        let id = UUID().uuidString
+        var data = try JSONEncoder().encode(ReviewRequest(id: id, conversation_id: conversationID.uuidString, decision: approve ? "approve" : "reject"))
+        data.append(0x0A)
+        return try await withCheckedThrowingContinuation { continuation in
+            pending = continuation
+            requestID = id
+            timeout = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(600)) } catch { return }
+                self?.stop(reason: "승인 처리 시간이 초과되었습니다.")
+            }
+            do { try input?.write(contentsOf: data) }
+            catch { stop(reason: "승인 요청을 전달하지 못했습니다: \(error.localizedDescription)") }
         }
     }
 
@@ -144,9 +177,11 @@ final class AgentProcessService {
                 // Ignore status events from workers started by an older build.
                 if reply.type == "progress" { continue }
                 if reply.type == "assistant_reply", let answer = reply.answer {
-                    finish(.success(answer))
+                    finish(.success(.answer(answer)))
+                } else if reply.type == "file_edit_proposal", let path = reply.path, let diff = reply.diff, let operation = reply.operation {
+                    finish(.success(.proposal(FileEditProposal(path: path, diff: diff, operation: operation))))
                 } else if reply.type == "conversation_deleted" {
-                    finish(.success(""))
+                    finish(.success(.answer("")))
                 } else {
                     finish(.failure(AgentFailure(message: reply.error ?? "에이전트 응답 오류")))
                 }
@@ -166,7 +201,7 @@ final class AgentProcessService {
             conversation_id: conversationID.uuidString
         ))
         data.append(0x0A)
-        _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<String, Error>) in
+        _ = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<AgentResult, Error>) in
             pending = continuation
             requestID = id
             timeout = Task { [weak self] in
@@ -181,7 +216,7 @@ final class AgentProcessService {
         }
     }
 
-    private func finish(_ result: Result<String, Error>) {
+    private func finish(_ result: Result<AgentResult, Error>) {
         timeout?.cancel()
         timeout = nil
         let continuation = pending

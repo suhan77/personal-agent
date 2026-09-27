@@ -2,6 +2,7 @@
 import asyncio
 from contextlib import AsyncExitStack
 import logging
+from uuid import UUID
 
 from personal_agent.llm.registry_llm import ChatModels
 from personal_agent.common.logging import configure_logging
@@ -69,9 +70,14 @@ class AgentRuntime:
             request = AgentRequest.model_validate(payload)
             logging.info(LogMessages.REQUEST_STARTED, request_id, request.model.value, len(request.message))
             result = await self._service.run(request)
-            response = {"id": request_id, "type": "assistant_reply", **result.model_dump(mode="json")}
+            response = {"id": request_id, "type": "assistant_reply", **result.model_dump(mode="json")} if not isinstance(result, dict) else {"id": request_id, **result}
             logging.info(LogMessages.REQUEST_COMPLETED, request_id, response["type"])
             return response
+
+        elif payload.get("type") == "review_file_change":
+            conversation_id = UUID(payload["conversation_id"])
+            result = await self._service.resume(conversation_id, payload["decision"])
+            return {"id": request_id, "type": "assistant_reply", **result.model_dump(mode="json")} if not isinstance(result, dict) else {"id": request_id, **result}
 
         # 등록되지 않은 JSON 명령은 처리하지 않는다.
         else:

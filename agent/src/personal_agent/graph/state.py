@@ -8,3 +8,5 @@ class AgentState(TypedDict):
     model: str
     working_directory: str | None
     context: NotRequired[dict[str, Any]]
+    file_change: NotRequired[dict[str, Any]]
+    file_decision: NotRequired[str]

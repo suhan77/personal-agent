@@ -10,13 +10,24 @@ struct ChatMessage: Identifiable, Equatable, Codable {
     let role: MessageRole
     let content: String
     let createdAt: Date
+    var proposal: FileEditProposal?
 
-    init(id: UUID = UUID(), role: MessageRole, content: String, createdAt: Date = .now) {
+    init(id: UUID = UUID(), role: MessageRole, content: String, createdAt: Date = .now, proposal: FileEditProposal? = nil) {
         self.id = id
         self.role = role
         self.content = content
         self.createdAt = createdAt
+        self.proposal = proposal
     }
+}
+
+struct FileEditProposal: Equatable, Codable {
+    let path: String
+    let diff: String
+    let operation: String
+    var status: Status = .pending
+
+    enum Status: String, Codable { case pending, approved, rejected, failed }
 }
 
 struct Conversation: Identifiable, Equatable, Codable {

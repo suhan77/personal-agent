@@ -103,6 +103,7 @@ final class ChatStore: ObservableObject {
         guard !text.isEmpty, !isGeneratingReply else { return }
         guard let conversationID = selectedConversationID,
               let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
+        guard !conversations[index].messages.contains(where: { $0.proposal?.status == .pending }) else { return }
 
         let userMessage = ChatMessage(role: .user, content: text)
         conversations[index].messages.append(userMessage)
@@ -117,15 +118,53 @@ final class ChatStore: ObservableObject {
             guard let self else { return }
             defer { self.isGeneratingReply = false }
             do {
-                let answer = try await self.agent.reply(
+                let result = try await self.agent.reply(
                     to: text,
                     conversationID: conversationID,
                     workingDirectory: self.workingDirectory
                 )
-                self.appendReply(answer, to: conversationID)
+                self.appendResult(result, to: conversationID)
             } catch {
                 self.appendReply("오류: \(error.localizedDescription)", to: conversationID)
             }
+        }
+    }
+
+    func reviewProposal(_ messageID: UUID, approve: Bool) {
+        guard !isGeneratingReply, let conversationID = selectedConversationID,
+              let index = conversations.firstIndex(where: { $0.id == conversationID }),
+              let messageIndex = conversations[index].messages.firstIndex(where: { $0.id == messageID }),
+              conversations[index].messages[messageIndex].proposal?.status == .pending else { return }
+        isGeneratingReply = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isGeneratingReply = false }
+            do {
+                let result = try await self.agent.review(conversationID: conversationID, approve: approve)
+                if let currentIndex = self.conversations.firstIndex(where: { $0.id == conversationID }),
+                   let currentMessageIndex = self.conversations[currentIndex].messages.firstIndex(where: { $0.id == messageID }) {
+                    self.conversations[currentIndex].messages[currentMessageIndex].proposal?.status = approve ? .approved : .rejected
+                    self.save()
+                }
+                self.appendResult(result, to: conversationID)
+            } catch {
+                if let currentIndex = self.conversations.firstIndex(where: { $0.id == conversationID }),
+                   let currentMessageIndex = self.conversations[currentIndex].messages.firstIndex(where: { $0.id == messageID }) {
+                    self.conversations[currentIndex].messages[currentMessageIndex].proposal?.status = .failed
+                    self.save()
+                }
+                self.appendReply("오류: \(error.localizedDescription)", to: conversationID)
+            }
+        }
+    }
+
+    private func appendResult(_ result: AgentProcessService.AgentResult, to conversationID: Conversation.ID) {
+        switch result {
+        case .answer(let answer): appendReply(answer, to: conversationID)
+        case .proposal(let proposal):
+            guard let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
+            conversations[index].messages.append(ChatMessage(role: .assistant, content: "다음 파일 변경을 제안합니다. 내용을 확인한 뒤 승인해 주세요.", proposal: proposal))
+            save()
         }
     }
 

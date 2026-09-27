@@ -86,6 +86,7 @@ private struct MessageList: View {
 }
 
 private struct MessageBubble: View {
+    @EnvironmentObject private var chatStore: ChatStore
     let message: ChatMessage
 
     var body: some View {
@@ -99,11 +100,29 @@ private struct MessageBubble: View {
                 Spacer(minLength: 60)
             }
 
-            Text(message.content)
-                .textSelection(.enabled)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .background(backgroundColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
+            VStack(alignment: .leading, spacing: 10) {
+                Text(message.content).textSelection(.enabled)
+                if let proposal = message.proposal {
+                    Text(proposal.path).font(.headline)
+                    ScrollView(.horizontal) {
+                        Text(proposal.diff).font(.system(.caption, design: .monospaced)).textSelection(.enabled)
+                    }
+                    .frame(maxHeight: 300)
+                    if proposal.status == .pending {
+                        HStack {
+                            Button("승인") { chatStore.reviewProposal(message.id, approve: true) }
+                            Button("거부") { chatStore.reviewProposal(message.id, approve: false) }
+                        }
+                        .disabled(chatStore.isGeneratingReply)
+                    } else {
+                        Text(proposal.status == .approved ? "적용됨" : proposal.status == .rejected ? "거부됨" : "실패")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(backgroundColor, in: RoundedRectangle(cornerRadius: 16, style: .continuous))
 
             if message.role == .assistant {
                 Spacer(minLength: 60)

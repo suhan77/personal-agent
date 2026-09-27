@@ -10,6 +10,45 @@ from personal_agent.common.timing import log_timed
 
 logger = logging.getLogger(__name__)
 
+MAX_TEXT_BYTES = 200_000
+
+
+def resolve_workspace_file(working_directory: str, path: str) -> Path:
+    if not isinstance(working_directory, str) or not working_directory.strip():
+        raise ValueError("Working directory is required")
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("File path is required")
+    root = Path(working_directory).expanduser().resolve()
+    if not root.is_dir():
+        raise NotADirectoryError(f"Directory not found: {root}")
+    relative = Path(path)
+    if relative.is_absolute() or ".." in relative.parts:
+        raise ValueError("File path must be relative to the working directory")
+    cursor = root
+    for component in relative.parts:
+        cursor = cursor / component
+        if cursor.is_symlink():
+            raise ValueError("Symbolic links are not allowed in file paths")
+    target = (root / relative).resolve()
+    if target == root or not target.is_relative_to(root):
+        raise ValueError("File path must stay within the working directory")
+    return target
+
+
+@tool
+def read_file(path: str, working_directory: Annotated[str, InjectedState("working_directory")]) -> str:
+    """작업 디렉터리 안의 UTF-8 텍스트 파일을 읽는다. path는 상대 경로다."""
+    target = resolve_workspace_file(working_directory, path)
+    if not target.is_file() or target.stat().st_size > MAX_TEXT_BYTES:
+        raise ValueError("File is missing or too large")
+    return target.read_text(encoding="utf-8")
+
+
+@tool
+def update_file(path: str, old_text: str, new_text: str) -> str:
+    """파일의 기존 문구를 새 문구로 바꿀 변경안을 제안한다. 실제 수정은 사용자 승인 후에만 한다."""
+    return "변경안 검토 대기"
+
 
 @tool
 @log_timed(LogMessages.DIRECTORY_TOOL)
