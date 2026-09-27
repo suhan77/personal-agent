@@ -3,11 +3,11 @@ import asyncio
 from contextlib import AsyncExitStack
 import logging
 
-from personal_agent.llm.model_factory import ChatModels
+from personal_agent.llm.registry_llm import ChatModels
 from personal_agent.common.logging import configure_logging
 from personal_agent.common.log_messages import LogMessages
-from personal_agent.common.timing import log_duration, log_timing
-from personal_agent.config.settings import get_settings
+from personal_agent.common.timing import log_duration, log_timed
+from personal_agent.config.settings import Settings, get_settings
 from personal_agent.graph.checkpoint import delete_conversation, open_checkpointer
 from personal_agent.schemas.agent import AgentRequest
 from personal_agent.services.chat_service import AgentService
@@ -35,16 +35,26 @@ class AgentRuntime:
         """
         settings = get_settings()
         configure_logging(settings.log_level)
-        with log_timing(LogMessages.MODEL_INITIALIZATION):
-            models = await asyncio.to_thread(ChatModels, settings)
+        models = await cls._load_models(settings)
         stack = AsyncExitStack()
         await stack.__aenter__()
-        with log_timing(LogMessages.GRAPH_INITIALIZATION):
-            saver = await stack.enter_async_context(
-                open_checkpointer(settings.agent_data_dir / "checkpoints.sqlite")
-            )
-            service = AgentService(models, saver)
+        saver, service = await cls._initialize_graph(stack, models, settings)
         return cls(stack, service, saver)
+
+    @staticmethod
+    @log_timed(LogMessages.MODEL_INITIALIZATION)
+    async def _load_models(settings: Settings) -> ChatModels:
+        return await asyncio.to_thread(ChatModels, settings)
+
+    @staticmethod
+    @log_timed(LogMessages.GRAPH_INITIALIZATION)
+    async def _initialize_graph(
+        stack: AsyncExitStack, models: ChatModels, settings: Settings
+    ):
+        saver = await stack.enter_async_context(
+            open_checkpointer(settings.agent_data_dir / "checkpoints.sqlite")
+        )
+        return saver, AgentService(models, saver)
 
     @log_duration(LogMessages.REQUEST_PROCESSING)
     async def handle(self, payload: dict, request_id: str) -> dict:
@@ -58,8 +68,7 @@ class AgentRuntime:
         elif payload.get("type") == "generate_reply":
             request = AgentRequest.model_validate(payload)
             logging.info(LogMessages.REQUEST_STARTED, request_id, request.model.value, len(request.message))
-            with log_timing(LogMessages.FULL_CONVERSATION):
-                result = await self._service.run(request)
+            result = await self._service.run(request)
             response = {"id": request_id, "type": "assistant_reply", **result.model_dump(mode="json")}
             logging.info(LogMessages.REQUEST_COMPLETED, request_id, response["type"])
             return response

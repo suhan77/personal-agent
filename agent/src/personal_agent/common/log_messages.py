@@ -15,6 +15,8 @@ class LogMessages:
     PIPELINE_INITIALIZATION = "생성 파이프라인 준비"
     DIRECTORY_LISTING = "디렉터리 조회 | 경로=%s | 항목=%d개"
     DIRECTORY_TOOL = "디렉터리 조회 도구 실행"
+    FILE_CREATION_TOOL = "파일 생성 도구 실행"
+    FILE_CREATED = "파일 생성 | 경로=%s | 내용 %d자"
     TOOL_CALLS_DETECTED = "도구 호출 확인 | 개수=%d | 이름=%s"
     ROUTE_SELECTED = "그래프 분기 | 다음=%s"
     MODEL_RAW_RESPONSE = "모델 원시 응답 | %r"

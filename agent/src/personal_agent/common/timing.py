@@ -58,3 +58,24 @@ def log_timing(phase: str):
     finally:
         stopped.set()
         reporter.join(timeout=0.1)
+
+
+def log_timed(phase: str):
+    """동기·비동기 함수 전체에 단계별 실행 시간 로그를 남긴다."""
+    def decorator(function):
+        if iscoroutinefunction(function):
+            @wraps(function)
+            async def async_wrapper(*args, **kwargs):
+                with log_timing(phase):
+                    return await function(*args, **kwargs)
+
+            return async_wrapper
+
+        @wraps(function)
+        def sync_wrapper(*args, **kwargs):
+            with log_timing(phase):
+                return function(*args, **kwargs)
+
+        return sync_wrapper
+
+    return decorator

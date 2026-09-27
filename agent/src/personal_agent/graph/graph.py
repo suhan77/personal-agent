@@ -3,19 +3,19 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.prebuilt import ToolNode
 
-from personal_agent.llm.model_factory import ChatModels
+from personal_agent.llm.registry_llm import ChatModels
 from personal_agent.graph.nodes.generation import GenerationNode
 from personal_agent.graph.nodes.history_summarization import HistorySummarizationNode
 from personal_agent.graph.routers import route_after_generation
 from personal_agent.graph.state import AgentState
-from personal_agent.tools.filesystem import list_directory
+from personal_agent.tools.filesystem import create_file, list_directory
 
 
 def build_agent_graph(
     models: ChatModels,
     checkpointer: BaseCheckpointSaver,
 ) -> CompiledStateGraph:
-    tools = [list_directory]
+    tools = [list_directory, create_file]
     generation_node = GenerationNode(models, tools)
     history_summarization_node = HistorySummarizationNode(models)
 

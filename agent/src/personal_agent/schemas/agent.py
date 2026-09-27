@@ -2,7 +2,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
-from personal_agent.llm.model_definitions import ChatModelName
+from personal_agent.llm.define_llm import ChatModelName
 
 
 class AgentRequest(BaseModel):

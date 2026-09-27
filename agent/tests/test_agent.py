@@ -14,9 +14,11 @@ from personal_agent.__main__ import serve
 from personal_agent.services.chat_service import AgentService
 from personal_agent.config.settings import Settings
 from personal_agent.graph.checkpoint import open_checkpointer
-from personal_agent.llm.model_factory import LocalHuggingFaceChatModel
-from personal_agent.llm.tool_call_parser import parse_tool_calls
+from personal_agent.llm.granite.chat_model import GraniteChatModel
+from personal_agent.llm.granite.tool_call_parser import parse_tool_calls
+from personal_agent.llm.granite.llm_config import GraniteLLMConfig
 from personal_agent.schemas.agent import AgentRequest
+from personal_agent.tools.filesystem import create_file
 
 
 class FakeModels:
@@ -28,6 +30,9 @@ class FakeModels:
 
     def get_with_max_new_tokens(self, name, max_new_tokens):
         return self.model
+
+    def get_summary_model(self):
+        return self.model, GraniteLLMConfig().parameters
 
     def get_with_tools(self, name, tools):
         return self.model
@@ -58,6 +63,34 @@ class ToolCallingFakeModel(FakeListChatModel):
 class ToolCallingFakeModels(FakeModels):
     def __init__(self, *args) -> None:
         self.model = ToolCallingFakeModel()
+
+
+class FileCreatingFakeModel(FakeListChatModel):
+    _calls: int = PrivateAttr(default=0)
+
+    def __init__(self) -> None:
+        super().__init__(responses=[])
+
+    async def ainvoke(self, messages, *args, **kwargs):
+        self._calls += 1
+        if self._calls == 1:
+            return AIMessage(
+                content="",
+                tool_calls=[{
+                    "name": "create_file",
+                    "args": {"path": "note.txt", "content": "테스트 내용"},
+                    "id": "call_create_file",
+                }],
+            )
+        tool_result = next(message for message in reversed(messages) if isinstance(message, ToolMessage))
+        if not tool_result.content.endswith("note.txt"):
+            raise AssertionError("Created file path was not returned to the model")
+        return AIMessage(content="note.txt 파일을 만들었습니다.")
+
+
+class FileCreatingFakeModels(FakeModels):
+    def __init__(self, *args) -> None:
+        self.model = FileCreatingFakeModel()
 
 
 class AgentTests(unittest.IsolatedAsyncioTestCase):
@@ -93,6 +126,21 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 )
 
             self.assertEqual(response.answer, "test.txt 파일을 찾았습니다.")
+            self.assertEqual(models.model._calls, 2)
+
+    async def test_tool_call_creates_file_in_selected_working_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            working_directory = Path(directory)
+            async with open_checkpointer(working_directory / "checkpoints.sqlite") as saver:
+                models = FileCreatingFakeModels()
+                service = AgentService(models, saver)
+                response = await service.run(AgentRequest(
+                    message="note.txt 파일을 만들어줘",
+                    working_directory=str(working_directory),
+                ))
+
+            self.assertEqual(response.answer, "note.txt 파일을 만들었습니다.")
+            self.assertEqual((working_directory / "note.txt").read_text(), "테스트 내용")
             self.assertEqual(models.model._calls, 2)
 
     async def test_protocol_recovers_and_reuses_model(self):
@@ -144,7 +192,7 @@ class ToolCallParserTests(unittest.TestCase):
         )
 
     def test_model_result_contains_tool_calls(self):
-        result = LocalHuggingFaceChatModel._to_chat_result(
+        result = GraniteChatModel._to_chat_result(
             LLMResult(
                 generations=[[
                     Generation(
@@ -170,13 +218,33 @@ class ToolCallParserTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            LocalHuggingFaceChatModel._to_chatml_format(tool_call)["tool_calls"],
+            GraniteChatModel._to_chatml_format(tool_call)["tool_calls"],
             [{"function": {"name": "list_directory", "arguments": {}}}],
         )
         self.assertEqual(
-            LocalHuggingFaceChatModel._to_chatml_format(tool_result),
+            GraniteChatModel._to_chatml_format(tool_result),
             {"role": "tool", "content": '[{"name": "test", "type": "file"}]'},
         )
+
+
+class FileCreationTests(unittest.TestCase):
+    def test_rejects_overwrite_and_paths_outside_working_directory(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "workspace"
+            root.mkdir()
+            arguments = {"working_directory": str(root), "content": "new"}
+
+            created = create_file.invoke({**arguments, "path": "note.txt"})
+            self.assertEqual(created, str((root / "note.txt").resolve()))
+            with self.assertRaises(FileExistsError):
+                create_file.invoke({**arguments, "path": "note.txt"})
+            self.assertEqual((root / "note.txt").read_text(), "new")
+
+            with self.assertRaises(ValueError):
+                create_file.invoke({**arguments, "path": "../outside.txt"})
+            with self.assertRaises(ValueError):
+                create_file.invoke({**arguments, "path": str(Path(directory) / "outside.txt")})
+            self.assertFalse((Path(directory) / "outside.txt").exists())
 
 
 if __name__ == "__main__":

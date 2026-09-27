@@ -5,7 +5,7 @@ SwiftUI 화면과 로컬 Python 에이전트를 하나의 저장소에서 관리
 ## 준비 및 실행
 
 1. Apple Silicon Mac에 Xcode와 uv를 설치합니다.
-2. 저장소 루트에서 Python 환경을 준비합니다.
+2. 저장소의 `agent` 폴더에서 Python 환경을 준비합니다.
 
    ```bash
    cd agent
