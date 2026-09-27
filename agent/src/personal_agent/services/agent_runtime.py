@@ -79,6 +79,11 @@ class AgentRuntime:
             result = await self._service.resume(conversation_id, payload["decision"])
             return {"id": request_id, "type": "assistant_reply", **result.model_dump(mode="json")} if not isinstance(result, dict) else {"id": request_id, **result}
 
+        elif payload.get("type") == "review_reminder":
+            conversation_id = UUID(payload["conversation_id"])
+            result = await self._service.resume_reminder(conversation_id, payload["result"])
+            return {"id": request_id, "type": "assistant_reply", **result.model_dump(mode="json")} if not isinstance(result, dict) else {"id": request_id, **result}
+
         # 등록되지 않은 JSON 명령은 처리하지 않는다.
         else:
             raise ValueError("Unsupported request type")

@@ -10,3 +10,6 @@ class AgentState(TypedDict):
     context: NotRequired[dict[str, Any]]
     file_change: NotRequired[dict[str, Any]]
     file_decision: NotRequired[str]
+    reminder_proposal: NotRequired[dict[str, Any]]
+    reminder_result: NotRequired[dict[str, Any]]
+    active_workflow: NotRequired[str | None]

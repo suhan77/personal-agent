@@ -46,7 +46,7 @@ def read_file(path: str, working_directory: Annotated[str, InjectedState("workin
 
 @tool
 def update_file(path: str, old_text: str, new_text: str) -> str:
-    """파일의 기존 문구를 새 문구로 바꿀 변경안을 제안한다. 실제 수정은 사용자 승인 후에만 한다."""
+    """파일을 수정할 때 사용한다. 먼저 read_file로 원본을 확인하고, 정확히 한 번 등장하는 기존 문구(old_text)와 바꿀 문구(new_text)를 제안한다. 실제 수정은 사용자 승인 후에만 한다."""
     return "변경안 검토 대기"
 
 

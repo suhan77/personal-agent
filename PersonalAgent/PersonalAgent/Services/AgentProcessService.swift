@@ -10,6 +10,14 @@ final class AgentProcessService {
     private var pending: CheckedContinuation<AgentResult, Error>?
     private var requestID: String?
     private var timeout: Task<Void, Never>?
+    private let reminders = ReminderService()
+
+    private struct ReminderLookupArguments: Decodable {
+        let query: String
+        let due_date: String?
+        let list_name: String?
+        let include_completed: Bool
+    }
 
     private struct Reply: Decodable {
         let id: String?
@@ -19,11 +27,16 @@ final class AgentProcessService {
         let path: String?
         let diff: String?
         let operation: String?
+        let reminder: ReminderProposal?
+        let tool: String?
+        let call_id: String?
+        let arguments: ReminderLookupArguments?
     }
 
     enum AgentResult {
         case answer(String)
         case proposal(FileEditProposal)
+        case reminder(ReminderProposal)
     }
 
     private struct Request: Encodable {
@@ -45,6 +58,28 @@ final class AgentProcessService {
         let type = "review_file_change"
         let conversation_id: String
         let decision: String
+    }
+
+    private struct ReminderReviewRequest: Encodable {
+        let id: String
+        let type = "review_reminder"
+        let conversation_id: String
+        let result: ReminderReviewResult
+    }
+
+    struct ReminderReviewResult: Encodable {
+        let proposal_id: String
+        let status: String
+        let identifier: String?
+        let error: String?
+    }
+
+    private struct NativeToolResult: Encodable {
+        let id: String
+        let type = "native_tool_result"
+        let call_id: String
+        let result: ReminderSearchResult?
+        let error: String?
     }
 
     struct AgentFailure: LocalizedError {
@@ -104,6 +139,24 @@ final class AgentProcessService {
             }
             do { try input?.write(contentsOf: data) }
             catch { stop(reason: "승인 요청을 전달하지 못했습니다: \(error.localizedDescription)") }
+        }
+    }
+
+    func reviewReminder(conversationID: UUID, result: ReminderReviewResult) async throws -> AgentResult {
+        guard pending == nil else { throw AgentFailure(message: "답변 생성 중입니다.") }
+        try startIfNeeded()
+        let id = UUID().uuidString
+        var data = try JSONEncoder().encode(ReminderReviewRequest(id: id, conversation_id: conversationID.uuidString, result: result))
+        data.append(0x0A)
+        return try await withCheckedThrowingContinuation { continuation in
+            pending = continuation
+            requestID = id
+            timeout = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(600)) } catch { return }
+                self?.stop(reason: "미리 알림 처리 시간이 초과되었습니다.")
+            }
+            do { try input?.write(contentsOf: data) }
+            catch { stop(reason: "미리 알림 결과를 전달하지 못했습니다: \(error.localizedDescription)") }
         }
     }
 
@@ -176,10 +229,14 @@ final class AgentProcessService {
                 guard reply.id == requestID else { continue }
                 // Ignore status events from workers started by an older build.
                 if reply.type == "progress" { continue }
-                if reply.type == "assistant_reply", let answer = reply.answer {
+                if reply.type == "native_tool_request", let callID = reply.call_id {
+                    handleNativeTool(reply, callID: callID)
+                } else if reply.type == "assistant_reply", let answer = reply.answer {
                     finish(.success(.answer(answer)))
                 } else if reply.type == "file_edit_proposal", let path = reply.path, let diff = reply.diff, let operation = reply.operation {
                     finish(.success(.proposal(FileEditProposal(path: path, diff: diff, operation: operation))))
+                } else if reply.type == "reminder_proposal", let reminder = reply.reminder {
+                    finish(.success(.reminder(reminder)))
                 } else if reply.type == "conversation_deleted" {
                     finish(.success(.answer("")))
                 } else {
@@ -188,6 +245,39 @@ final class AgentProcessService {
             } catch {
                 stop(reason: "에이전트 응답을 읽지 못했습니다: \(error.localizedDescription)")
                 return
+            }
+        }
+    }
+
+    private func handleNativeTool(_ reply: Reply, callID: String) {
+        guard let parentID = reply.id else { return }
+        NSLog("macOS 도구 요청 수신: %@", reply.tool ?? "unknown")
+        Task { [weak self] in
+            guard let self else { return }
+            let response: NativeToolResult
+            if reply.tool == "find_reminders", let arguments = reply.arguments {
+                do {
+                    let items = try await reminders.find(query: arguments.query, dueDate: arguments.due_date,
+                                                         listName: arguments.list_name,
+                                                         includeCompleted: arguments.include_completed)
+                    NSLog("미리 알림 조회 완료: %d건", items.items.count)
+                    response = NativeToolResult(id: parentID, call_id: callID, result: items, error: nil)
+                } catch {
+                    NSLog("미리 알림 조회 실패: %@", error.localizedDescription)
+                    response = NativeToolResult(id: parentID, call_id: callID, result: nil,
+                                                error: error.localizedDescription)
+                }
+            } else {
+                response = NativeToolResult(id: parentID, call_id: callID, result: nil,
+                                            error: "지원하지 않는 macOS 도구 요청입니다.")
+            }
+            guard requestID == parentID else { return }
+            do {
+                var data = try JSONEncoder().encode(response)
+                data.append(0x0A)
+                try input?.write(contentsOf: data)
+            } catch {
+                stop(reason: "macOS 도구 결과를 전달하지 못했습니다: \(error.localizedDescription)")
             }
         }
     }

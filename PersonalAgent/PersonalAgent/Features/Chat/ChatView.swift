@@ -119,6 +119,45 @@ private struct MessageBubble: View {
                             .foregroundStyle(.secondary)
                     }
                 }
+                if let reminder = message.reminderProposal {
+                    Text(reminder.title).font(.headline)
+                    Text("날짜: \(reminder.dueDate)" + (reminder.dueTime.map { " \($0) (\(TimeZone.current.identifier))" } ?? " (종일)"))
+                    if let notes = reminder.notes { Text("메모: \(notes)") }
+                    if let url = reminder.url { Text("URL: \(url)") }
+                    Text("목록: \(reminder.listName ?? "기본 목록")")
+                    if let frequency = reminder.repeat {
+                        Text("반복: \(["daily": "매일", "weekly": "매주", "monthly": "매월", "yearly": "매년"][frequency] ?? frequency)")
+                    }
+                    if let priority = reminder.priority {
+                        Text("우선순위: \(["low": "낮음", "medium": "보통", "high": "높음"][priority] ?? priority)")
+                    }
+                    if reminder.status == .pending {
+                        HStack {
+                            Button("승인") { chatStore.reviewReminderProposal(message.id, approve: true) }
+                            Button("거부") { chatStore.reviewReminderProposal(message.id, approve: false) }
+                        }
+                        .disabled(chatStore.isGeneratingReply)
+                    } else if reminder.status == .saving {
+                        Text("저장 결과 확인 필요 · 자동 재저장 안 함")
+                            .foregroundStyle(.orange)
+                        Text("미리 알림 앱에서 이 항목이 실제 등록됐는지 확인한 후 선택하세요.")
+                            .foregroundStyle(.secondary)
+                        if let detail = reminder.failureMessage { Text(detail).foregroundStyle(.secondary) }
+                        HStack {
+                            Button("등록됨 확인") { chatStore.resolveUncertainReminder(message.id, wasSaved: true) }
+                            Button("등록 안 됨 확인") { chatStore.resolveUncertainReminder(message.id, wasSaved: false) }
+                        }
+                        .disabled(chatStore.isGeneratingReply)
+                    } else {
+                        Text(reminder.status == .approved ? "등록됨" : reminder.status == .rejected ? "거부됨" : "등록 실패")
+                            .foregroundStyle(.secondary)
+                        if let detail = reminder.failureMessage, reminder.status == .failed { Text(detail).foregroundStyle(.secondary) }
+                        if !reminder.resultDelivered {
+                            Button("결과 전달 재시도") { chatStore.retryReminderResult(message.id) }
+                                .disabled(chatStore.isGeneratingReply)
+                        }
+                    }
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)

@@ -7,8 +7,9 @@ from unittest.mock import patch
 from uuid import uuid4
 
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.outputs import Generation, LLMResult
+from langchain_community.utilities.duckduckgo_search import DuckDuckGoSearchAPIWrapper
 from pydantic import PrivateAttr
 from personal_agent.__main__ import serve
 from personal_agent.services.chat_service import AgentService
@@ -113,7 +114,188 @@ class FileUpdatingFakeModels(FakeModels):
         self.model = FileUpdatingFakeModel()
 
 
+class WebSearchingFakeModel(FakeListChatModel):
+    _calls: int = PrivateAttr(default=0)
+
+    def __init__(self) -> None:
+        super().__init__(responses=[])
+
+    async def ainvoke(self, messages, *args, **kwargs):
+        self._calls += 1
+        if self._calls == 1:
+            return AIMessage(content="", tool_calls=[{
+                "name": "web_search", "args": {"query": "LangGraph 공식 문서"}, "id": "search_1"
+            }])
+        tool_result = next(message for message in reversed(messages) if isinstance(message, ToolMessage))
+        if "https://langchain-ai.github.io/langgraph/" not in tool_result.content:
+            raise AssertionError("Search result URL was not passed to the model")
+        return AIMessage(content="공식 문서: https://langchain-ai.github.io/langgraph/")
+
+
+class WebSearchingFakeModels(FakeModels):
+    def __init__(self, *args) -> None:
+        self.model = WebSearchingFakeModel()
+
+
+class ReminderFakeModel(FakeListChatModel):
+    _calls: int = PrivateAttr(default=0)
+
+    def __init__(self) -> None:
+        super().__init__(responses=[])
+
+    async def ainvoke(self, messages, *args, **kwargs):
+        self._calls += 1
+        if not any(isinstance(message, ToolMessage) for message in messages):
+            return AIMessage(content="", tool_calls=[{
+                "name": "propose_reminder",
+                "args": {"title": "발표 준비", "due_date": "2026-09-29", "priority": "high"},
+                "id": "reminder_1",
+            }])
+        tool_result = next(message for message in reversed(messages) if isinstance(message, ToolMessage))
+        return AIMessage(content=tool_result.content)
+
+
+class ReminderFakeModels(FakeModels):
+    def __init__(self, *args) -> None:
+        self.model = ReminderFakeModel()
+
+
+class ReminderFlakyFakeModel(ReminderFakeModel):
+    async def ainvoke(self, messages, *args, **kwargs):
+        if any(isinstance(message, ToolMessage) for message in messages) and self._calls == 1:
+            self._calls += 1
+            raise RuntimeError("temporary model failure")
+        return await super().ainvoke(messages, *args, **kwargs)
+
+
+class ReminderFlakyFakeModels(FakeModels):
+    def __init__(self, *args) -> None:
+        self.model = ReminderFlakyFakeModel()
+
+
+class ReminderInformationFakeModel(FakeListChatModel):
+    def __init__(self) -> None:
+        super().__init__(responses=[])
+
+    async def ainvoke(self, messages, *args, **kwargs):
+        assert isinstance(messages[0], SystemMessage)
+        assert "미리 알림 등록에는 제목과 날짜가 필수" in messages[0].content
+        inputs = [message.content for message in messages if isinstance(message, HumanMessage)]
+        if len(inputs) == 1:
+            return AIMessage(content="필수: 제목, 날짜. 선택: 시간, 메모, URL, 목록, 반복, 우선순위.")
+        if len(inputs) == 2:
+            return AIMessage(content="날짜를 알려주세요.")
+        return AIMessage(content="", tool_calls=[{
+            "name": "propose_reminder", "args": {"title": "발표 준비", "due_date": "2026-09-29"},
+            "id": "after_missing_inputs",
+        }])
+
+
+class ReminderInformationFakeModels(FakeModels):
+    def __init__(self, *args) -> None:
+        self.model = ReminderInformationFakeModel()
+
+
 class AgentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_missing_reminder_information_is_carried_across_turns(self):
+        with tempfile.TemporaryDirectory() as directory:
+            async with open_checkpointer(Path(directory) / "checkpoints.sqlite") as saver:
+                service = AgentService(ReminderInformationFakeModels(), saver)
+                conversation_id = uuid4()
+                first = await service.run(AgentRequest(message="리마인더 등록해줘", conversation_id=conversation_id))
+                self.assertIn("제목, 날짜", first.answer)
+                state = await service.graph.aget_state({"configurable": {"thread_id": str(conversation_id)}})
+                self.assertEqual(state.values["active_workflow"], "reminder")
+                self.assertFalse(any(isinstance(message, SystemMessage) for message in state.values["messages"]))
+                second = await service.run(AgentRequest(message="발표 준비", conversation_id=conversation_id))
+                self.assertIn("날짜", second.answer)
+                proposal = await service.run(AgentRequest(message="2026-09-29", conversation_id=conversation_id))
+                self.assertEqual(proposal["type"], "reminder_proposal")
+                self.assertEqual(proposal["reminder"]["title"], "발표 준비")
+
+    async def test_reminder_proposal_waits_for_save_result(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "checkpoints.sqlite"
+            async with open_checkpointer(path) as saver:
+                service = AgentService(ReminderFakeModels(), saver)
+                proposal = await service.run(AgentRequest(message="내일 발표 준비 알림 등록해줘"))
+                self.assertEqual(proposal["type"], "reminder_proposal")
+                self.assertEqual(proposal["reminder"]["priority"], "high")
+                proposal_id = proposal["reminder"]["proposal_id"]
+                state = await service.graph.aget_state({"configurable": {"thread_id": proposal["conversation_id"]}})
+                self.assertIn("review_reminder", state.next)
+                with self.assertRaisesRegex(ValueError, "identifier"):
+                    await service.resume_reminder(proposal["conversation_id"], {"status": "saved", "proposal_id": proposal_id})
+                with self.assertRaisesRegex(ValueError, "does not match"):
+                    await service.resume_reminder(proposal["conversation_id"], {"status": "rejected", "proposal_id": "wrong"})
+                result = {"status": "saved", "proposal_id": proposal_id, "identifier": "test-id"}
+                final = await service.resume_reminder(proposal["conversation_id"], result)
+                self.assertIn("저장에 성공", final.answer)
+                self.assertIn("test-id", final.answer)
+                state = await service.graph.aget_state({"configurable": {"thread_id": proposal["conversation_id"]}})
+                self.assertIsNone(state.values["active_workflow"])
+                repeated = await service.resume_reminder(proposal["conversation_id"], result)
+                self.assertEqual(repeated.answer, final.answer)
+
+    async def test_reminder_rejection_does_not_claim_saved(self):
+        with tempfile.TemporaryDirectory() as directory:
+            async with open_checkpointer(Path(directory) / "checkpoints.sqlite") as saver:
+                service = AgentService(ReminderFakeModels(), saver)
+                proposal = await service.run(AgentRequest(message="알림 등록해줘"))
+                final = await service.resume_reminder(proposal["conversation_id"], {"status": "rejected", "proposal_id": proposal["reminder"]["proposal_id"]})
+                self.assertIn("저장되지 않았습니다", final.answer)
+
+    async def test_reminder_pending_review_survives_restart(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "checkpoints.sqlite"
+            async with open_checkpointer(path) as saver:
+                service = AgentService(ReminderFakeModels(), saver)
+                proposal = await service.run(AgentRequest(message="알림 등록해줘"))
+            async with open_checkpointer(path) as saver:
+                service = AgentService(ReminderFakeModels(), saver)
+                state = await service.graph.aget_state({"configurable": {"thread_id": proposal["conversation_id"]}})
+                self.assertIn("review_reminder", state.next)
+                final = await service.resume_reminder(proposal["conversation_id"], {
+                    "status": "confirmed_not_saved", "proposal_id": proposal["reminder"]["proposal_id"]
+                })
+                self.assertIn("등록되지 않았음", final.answer)
+
+    async def test_reminder_save_failure_is_reported(self):
+        with tempfile.TemporaryDirectory() as directory:
+            async with open_checkpointer(Path(directory) / "checkpoints.sqlite") as saver:
+                service = AgentService(ReminderFakeModels(), saver)
+                proposal = await service.run(AgentRequest(message="알림 등록해줘"))
+                final = await service.resume_reminder(proposal["conversation_id"], {
+                    "status": "failed", "proposal_id": proposal["reminder"]["proposal_id"],
+                    "error": "미리 알림 접근 권한이 없습니다",
+                })
+                self.assertIn("실패", final.answer)
+                self.assertIn("권한", final.answer)
+
+    async def test_saved_reminder_result_can_resume_after_model_failure(self):
+        with tempfile.TemporaryDirectory() as directory:
+            async with open_checkpointer(Path(directory) / "checkpoints.sqlite") as saver:
+                service = AgentService(ReminderFlakyFakeModels(), saver)
+                proposal = await service.run(AgentRequest(message="알림 등록해줘"))
+                result = {"status": "saved", "proposal_id": proposal["reminder"]["proposal_id"], "identifier": "saved-id"}
+                with self.assertRaisesRegex(RuntimeError, "temporary model failure"):
+                    await service.resume_reminder(proposal["conversation_id"], result)
+                final = await service.resume_reminder(proposal["conversation_id"], result)
+                self.assertIn("saved-id", final.answer)
+
+    async def test_web_search_returns_sources_to_model(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with patch.object(DuckDuckGoSearchAPIWrapper, "results", return_value=[{
+                "title": "LangGraph", "link": "https://langchain-ai.github.io/langgraph/", "snippet": "공식 문서"
+            }]) as search:
+                async with open_checkpointer(Path(directory) / "checkpoints.sqlite") as saver:
+                    models = WebSearchingFakeModels()
+                    service = AgentService(models, saver)
+                    response = await service.run(AgentRequest(message="LangGraph 찾아줘"))
+            self.assertIn("https://langchain-ai.github.io/langgraph/", response.answer)
+            self.assertEqual(search.call_count, 1)
+            self.assertEqual(models.model._calls, 2)
+
     async def test_update_requires_approval_and_reject_does_not_write(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -163,13 +345,13 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 await service.run(AgentRequest(message="첫 메시지", conversation_id=first))
                 await service.run(AgentRequest(message="후속 메시지", conversation_id=first))
                 await service.run(AgentRequest(message="새 대화", conversation_id=second))
-                for conversation, expected in [(first, 5), (second, 3)]:
+                for conversation, expected in [(first, 4), (second, 2)]:
                     state = await service.graph.aget_state({"configurable": {"thread_id": str(conversation)}})
                     self.assertEqual(len(state.values["messages"]), expected)
             async with open_checkpointer(path) as saver:
                 service = AgentService(FakeModels(), saver)
                 state = await service.graph.aget_state({"configurable": {"thread_id": str(first)}})
-                self.assertEqual(state.values["messages"][1].content, "첫 메시지")
+                self.assertEqual(state.values["messages"][0].content, "첫 메시지")
 
     async def test_tool_call_lists_the_selected_working_directory(self):
         with tempfile.TemporaryDirectory() as directory:
