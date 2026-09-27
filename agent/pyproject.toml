@@ -6,7 +6,6 @@ build-backend = "hatchling.build"
 name = "personal-agent-agent"
 version = "0.1.0"
 description = "Local Hugging Face agent called directly by Swift"
-readme = "README.md"
 requires-python = "==3.13.*"
 dependencies = [
     "accelerate>=1.15.0",
