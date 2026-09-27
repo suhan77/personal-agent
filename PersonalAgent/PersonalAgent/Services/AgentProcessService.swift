@@ -13,10 +13,11 @@ final class AgentProcessService {
     private let reminders = ReminderService()
 
     private struct ReminderLookupArguments: Decodable {
-        let query: String
+        let query: String?
         let due_date: String?
         let list_name: String?
-        let include_completed: Bool
+        let include_completed: Bool?
+        let identifier: String?
     }
 
     private struct Reply: Decodable {
@@ -28,6 +29,7 @@ final class AgentProcessService {
         let diff: String?
         let operation: String?
         let reminder: ReminderProposal?
+        let reminder_update: ReminderUpdateProposal?
         let tool: String?
         let call_id: String?
         let arguments: ReminderLookupArguments?
@@ -37,6 +39,7 @@ final class AgentProcessService {
         case answer(String)
         case proposal(FileEditProposal)
         case reminder(ReminderProposal)
+        case reminderUpdate(ReminderUpdateProposal)
     }
 
     private struct Request: Encodable {
@@ -67,6 +70,13 @@ final class AgentProcessService {
         let result: ReminderReviewResult
     }
 
+    private struct ReminderUpdateReviewRequest: Encodable {
+        let id: String
+        let type = "review_reminder_update"
+        let conversation_id: String
+        let result: ReminderReviewResult
+    }
+
     struct ReminderReviewResult: Encodable {
         let proposal_id: String
         let status: String
@@ -74,11 +84,23 @@ final class AgentProcessService {
         let error: String?
     }
 
+    private enum NativeResult: Encodable {
+        case search(ReminderSearchResult)
+        case snapshot(ReminderSnapshot)
+
+        func encode(to encoder: Encoder) throws {
+            switch self {
+            case .search(let value): try value.encode(to: encoder)
+            case .snapshot(let value): try value.encode(to: encoder)
+            }
+        }
+    }
+
     private struct NativeToolResult: Encodable {
         let id: String
         let type = "native_tool_result"
         let call_id: String
-        let result: ReminderSearchResult?
+        let result: NativeResult?
         let error: String?
     }
 
@@ -160,6 +182,24 @@ final class AgentProcessService {
         }
     }
 
+    func reviewReminderUpdate(conversationID: UUID, result: ReminderReviewResult) async throws -> AgentResult {
+        guard pending == nil else { throw AgentFailure(message: "답변 생성 중입니다.") }
+        try startIfNeeded()
+        let id = UUID().uuidString
+        var data = try JSONEncoder().encode(ReminderUpdateReviewRequest(id: id, conversation_id: conversationID.uuidString, result: result))
+        data.append(0x0A)
+        return try await withCheckedThrowingContinuation { continuation in
+            pending = continuation
+            requestID = id
+            timeout = Task { [weak self] in
+                do { try await Task.sleep(for: .seconds(600)) } catch { return }
+                self?.stop(reason: "미리 알림 수정 처리 시간이 초과되었습니다.")
+            }
+            do { try input?.write(contentsOf: data) }
+            catch { stop(reason: "미리 알림 수정 결과를 전달하지 못했습니다: \(error.localizedDescription)") }
+        }
+    }
+
     private func startIfNeeded() throws {
         if let process, process.isRunning { return }
         stop(reason: "에이전트를 다시 시작합니다.")
@@ -237,6 +277,8 @@ final class AgentProcessService {
                     finish(.success(.proposal(FileEditProposal(path: path, diff: diff, operation: operation))))
                 } else if reply.type == "reminder_proposal", let reminder = reply.reminder {
                     finish(.success(.reminder(reminder)))
+                } else if reply.type == "reminder_update_proposal", let proposal = reply.reminder_update {
+                    finish(.success(.reminderUpdate(proposal)))
                 } else if reply.type == "conversation_deleted" {
                     finish(.success(.answer("")))
                 } else {
@@ -255,17 +297,24 @@ final class AgentProcessService {
         Task { [weak self] in
             guard let self else { return }
             let response: NativeToolResult
-            if reply.tool == "find_reminders", let arguments = reply.arguments {
+            if reply.tool == "find_reminders", let arguments = reply.arguments, let query = arguments.query {
                 do {
-                    let items = try await reminders.find(query: arguments.query, dueDate: arguments.due_date,
+                    let items = try await reminders.find(query: query, dueDate: arguments.due_date,
                                                          listName: arguments.list_name,
-                                                         includeCompleted: arguments.include_completed)
+                                                         includeCompleted: arguments.include_completed ?? false)
                     NSLog("미리 알림 조회 완료: %d건", items.items.count)
-                    response = NativeToolResult(id: parentID, call_id: callID, result: items, error: nil)
+                    response = NativeToolResult(id: parentID, call_id: callID, result: .search(items), error: nil)
                 } catch {
                     NSLog("미리 알림 조회 실패: %@", error.localizedDescription)
                     response = NativeToolResult(id: parentID, call_id: callID, result: nil,
                                                 error: error.localizedDescription)
+                }
+            } else if reply.tool == "get_reminder", let identifier = reply.arguments?.identifier {
+                do {
+                    let snapshot = try await reminders.snapshot(identifier: identifier)
+                    response = NativeToolResult(id: parentID, call_id: callID, result: .snapshot(snapshot), error: nil)
+                } catch {
+                    response = NativeToolResult(id: parentID, call_id: callID, result: nil, error: error.localizedDescription)
                 }
             } else {
                 response = NativeToolResult(id: parentID, call_id: callID, result: nil,

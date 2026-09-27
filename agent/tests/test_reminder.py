@@ -25,7 +25,7 @@ class ReminderProposalTests(unittest.TestCase):
             self.assertNotIn(tool_name, prompt)
 
         reminder_prompt = build_prompt("reminder", now)
-        self.assertIn("제목과 날짜가 필수", reminder_prompt)
+        self.assertIn("등록에만 제목과 날짜가 필수", reminder_prompt)
         self.assertIn("빠진 필수 항목만 묻는다", reminder_prompt)
         self.assertIn("propose_reminder", reminder_prompt)
         self.assertEqual(build_prompt(None, now), prompt)

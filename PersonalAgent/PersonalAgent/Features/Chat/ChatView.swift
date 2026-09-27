@@ -158,6 +158,49 @@ private struct MessageBubble: View {
                         }
                     }
                 }
+                if let update = message.reminderUpdateProposal {
+                    Text(update.before.title).font(.headline)
+                    Text("목록: \(update.before.listName) · ID: \(update.identifier)")
+                        .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                    if update.operation == .delete {
+                        Text("날짜: \(update.before.dueDate ?? "없음")" + (update.before.dueTime.map { " \($0)" } ?? ""))
+                        if let notes = update.before.notes { Text("메모: \(notes)") }
+                        if let frequency = update.before.repeat { Text("반복: \(frequency) · 반복 항목 전체 삭제") }
+                        Text("승인하면 이 미리 알림을 삭제합니다.").foregroundStyle(.red)
+                    } else {
+                        ForEach(update.changedLines, id: \.self) { line in
+                            Text(line).textSelection(.enabled)
+                        }
+                    }
+                    if update.status == .pending {
+                        HStack {
+                            if update.operation == .delete {
+                                Button("삭제 승인", role: .destructive) { chatStore.reviewReminderUpdateProposal(message.id, approve: true) }
+                            } else {
+                                Button("승인") { chatStore.reviewReminderUpdateProposal(message.id, approve: true) }
+                            }
+                            Button("거부") { chatStore.reviewReminderUpdateProposal(message.id, approve: false) }
+                        }
+                        .disabled(chatStore.isGeneratingReply)
+                    } else if update.status == .saving {
+                        Text("\(update.operation == .delete ? "삭제" : "수정") 결과 확인 필요 · 자동 재실행 안 함").foregroundStyle(.orange)
+                        Text("미리 알림 앱에서 \(update.operation == .delete ? "삭제" : "수정")됐는지 확인한 후 선택하세요.").foregroundStyle(.secondary)
+                        if let detail = update.failureMessage { Text(detail).foregroundStyle(.secondary) }
+                        HStack {
+                            Button(update.operation == .delete ? "삭제됨 확인" : "수정됨 확인") { chatStore.resolveUncertainReminderUpdate(message.id, wasUpdated: true) }
+                            Button(update.operation == .delete ? "삭제 안 됨 확인" : "수정 안 됨 확인") { chatStore.resolveUncertainReminderUpdate(message.id, wasUpdated: false) }
+                        }
+                        .disabled(chatStore.isGeneratingReply)
+                    } else {
+                        Text(update.status == .approved ? (update.operation == .delete ? "삭제됨" : "수정됨") : update.status == .rejected ? "거부됨" : (update.operation == .delete ? "삭제 실패" : "수정 실패"))
+                            .foregroundStyle(.secondary)
+                        if let detail = update.failureMessage, update.status == .failed { Text(detail).foregroundStyle(.secondary) }
+                        if !update.resultDelivered {
+                            Button("결과 전달 재시도") { chatStore.retryReminderUpdateResult(message.id) }
+                                .disabled(chatStore.isGeneratingReply)
+                        }
+                    }
+                }
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
@@ -172,6 +215,25 @@ private struct MessageBubble: View {
 
     private var backgroundColor: Color {
         message.role == .user ? .accentColor.opacity(0.18) : .secondary.opacity(0.12)
+    }
+}
+
+private extension ReminderUpdateProposal {
+    var changedLines: [String] {
+        let fields: [(String, String?, String?)] = [
+            ("제목", before.title, after.title),
+            ("날짜", before.dueDate, after.dueDate),
+            ("시간", before.dueTime, after.dueTime),
+            ("메모", before.notes, after.notes),
+            ("URL", before.url, after.url),
+            ("목록", before.listName, after.listName),
+            ("반복", before.repeat, after.repeat),
+            ("우선순위", before.priority, after.priority)
+        ]
+        return fields.compactMap { label, old, new in
+            guard old != new else { return nil }
+            return "\(label): \(old ?? "없음") → \(new ?? "없음")"
+        }
     }
 }
 

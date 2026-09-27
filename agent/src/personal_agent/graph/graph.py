@@ -7,6 +7,7 @@ from personal_agent.llm.registry_llm import ChatModels
 from personal_agent.graph.nodes.generation import GenerationNode
 from personal_agent.graph.nodes.file_review import apply_file_change, prepare_file_change, review_file_change
 from personal_agent.graph.nodes.reminder_review import prepare_reminder, review_reminder, finish_reminder
+from personal_agent.graph.nodes.reminder_change_review import prepare_reminder_change, review_reminder_change, finish_reminder_change
 from personal_agent.graph.nodes.workflow import select_workflow
 from personal_agent.graph.nodes.history_summarization import HistorySummarizationNode
 from personal_agent.graph.routers import route_after_generation
@@ -15,6 +16,8 @@ from personal_agent.tools.filesystem import create_file, list_directory, read_fi
 from personal_agent.tools.web_search import create_web_search_tool
 from personal_agent.tools.reminder import propose_reminder
 from personal_agent.tools.reminder_search import find_reminders
+from personal_agent.tools.reminder_update import propose_update_reminder
+from personal_agent.tools.reminder_delete import propose_delete_reminder
 
 
 def build_agent_graph(
@@ -22,7 +25,8 @@ def build_agent_graph(
     checkpointer: BaseCheckpointSaver,
 ) -> CompiledStateGraph:
     web_search = create_web_search_tool()
-    tools = [list_directory, read_file, web_search, create_file, update_file, propose_reminder, find_reminders]
+    tools = [list_directory, read_file, web_search, create_file, update_file, propose_reminder,
+             find_reminders, propose_update_reminder, propose_delete_reminder]
     generation_node = GenerationNode(models, tools)
     history_summarization_node = HistorySummarizationNode(models)
 
@@ -40,6 +44,10 @@ def build_agent_graph(
     graph.add_node("prepare_reminder", prepare_reminder)
     graph.add_node("review_reminder", review_reminder)
     graph.add_node("finish_reminder", finish_reminder)
+    # 기존 체크포인트의 대기 노드 이름을 유지하면서 수정·삭제 경로를 공유한다.
+    graph.add_node("prepare_reminder_update", prepare_reminder_change)
+    graph.add_node("review_reminder_update", review_reminder_change)
+    graph.add_node("finish_reminder_update", finish_reminder_change)
 
     graph.add_edge(START, "select_workflow")
     graph.add_edge("select_workflow", "summarize_history")
@@ -47,7 +55,7 @@ def build_agent_graph(
     graph.add_conditional_edges(
         "generate",
         route_after_generation, # 다음 경로를 결정하는 함수
-        {"tools": "tools", "review_file_change": "prepare_file_change", "review_reminder": "prepare_reminder", "end": END}, # 함수 결과와 실제 노드의 매핑
+        {"tools": "tools", "review_file_change": "prepare_file_change", "review_reminder": "prepare_reminder", "review_reminder_update": "prepare_reminder_update", "end": END}, # 함수 결과와 실제 노드의 매핑
     )
     graph.add_edge("tools", "generate")
     graph.add_edge("prepare_file_change", "review_file_change")
@@ -56,4 +64,7 @@ def build_agent_graph(
     graph.add_edge("prepare_reminder", "review_reminder")
     graph.add_edge("review_reminder", "finish_reminder")
     graph.add_edge("finish_reminder", "generate")
+    graph.add_edge("prepare_reminder_update", "review_reminder_update")
+    graph.add_edge("review_reminder_update", "finish_reminder_update")
+    graph.add_edge("finish_reminder_update", "generate")
     return graph.compile(checkpointer=checkpointer)

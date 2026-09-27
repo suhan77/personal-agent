@@ -12,12 +12,14 @@ from personal_agent.config.settings import Settings, get_settings
 from personal_agent.graph.checkpoint import delete_conversation, open_checkpointer
 from personal_agent.schemas.agent import AgentRequest
 from personal_agent.services.chat_service import AgentService
+from personal_agent.services.review_service import ReviewService
 
 
 class AgentRuntime:
-    def __init__(self, stack: AsyncExitStack, service: AgentService, saver) -> None:
+    def __init__(self, stack: AsyncExitStack, service: AgentService, reviews: ReviewService, saver) -> None:
         self._stack = stack
         self._service = service
+        self._reviews = reviews
         self._saver = saver
 
     @classmethod
@@ -29,7 +31,7 @@ class AgentRuntime:
         1. 환경 설정을 읽고 로그 레벨을 적용한다.
         2. Python 모델과 생성 파이프라인을 미리 메모리에 적재한다.
         3. SQLite 체크포인터를 열어 대화 이력을 복원하거나 저장할 수 있게 한다.
-        4. 모델과 체크포인터를 사용하는 `AgentService`를 구성한다.
+        4. 하나의 그래프를 공유하는 `AgentService`와 `ReviewService`를 구성한다.
 
         반환된 런타임은 Python 워커가 살아 있는 동안 재사용해야 하며,
         사용이 끝나면 `close()`를 호출해 체크포인터 연결을 닫아야 한다.
@@ -39,8 +41,8 @@ class AgentRuntime:
         models = await cls._load_models(settings)
         stack = AsyncExitStack()
         await stack.__aenter__()
-        saver, service = await cls._initialize_graph(stack, models, settings)
-        return cls(stack, service, saver)
+        saver, service, reviews = await cls._initialize_graph(stack, models, settings)
+        return cls(stack, service, reviews, saver)
 
     @staticmethod
     @log_timed(LogMessages.MODEL_INITIALIZATION)
@@ -55,7 +57,8 @@ class AgentRuntime:
         saver = await stack.enter_async_context(
             open_checkpointer(settings.agent_data_dir / "checkpoints.sqlite")
         )
-        return saver, AgentService(models, saver)
+        service = AgentService(models, saver)
+        return saver, service, ReviewService(service.graph)
 
     @log_duration(LogMessages.REQUEST_PROCESSING)
     async def handle(self, payload: dict, request_id: str) -> dict:
@@ -76,12 +79,17 @@ class AgentRuntime:
 
         elif payload.get("type") == "review_file_change":
             conversation_id = UUID(payload["conversation_id"])
-            result = await self._service.resume(conversation_id, payload["decision"])
+            result = await self._reviews.resume_file_change(conversation_id, payload["decision"])
             return {"id": request_id, "type": "assistant_reply", **result.model_dump(mode="json")} if not isinstance(result, dict) else {"id": request_id, **result}
 
         elif payload.get("type") == "review_reminder":
             conversation_id = UUID(payload["conversation_id"])
-            result = await self._service.resume_reminder(conversation_id, payload["result"])
+            result = await self._reviews.resume_reminder_creation(conversation_id, payload["result"])
+            return {"id": request_id, "type": "assistant_reply", **result.model_dump(mode="json")} if not isinstance(result, dict) else {"id": request_id, **result}
+
+        elif payload.get("type") == "review_reminder_update":
+            conversation_id = UUID(payload["conversation_id"])
+            result = await self._reviews.resume_reminder_change(conversation_id, payload["result"])
             return {"id": request_id, "type": "assistant_reply", **result.model_dump(mode="json")} if not isinstance(result, dict) else {"id": request_id, **result}
 
         # 등록되지 않은 JSON 명령은 처리하지 않는다.

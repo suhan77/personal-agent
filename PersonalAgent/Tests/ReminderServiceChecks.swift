@@ -9,6 +9,11 @@ final class FakeReminderStore: ReminderStoring {
     var saveCalls = 0
     var fetchedReminders: [EKReminder] = []
     var callbackOnBackground = false
+    var existingReminder: EKReminder?
+    var shouldFailSave = true
+    var shouldFailRemove = false
+    var removeCalls = 0
+    var removedReminder: EKReminder?
     var defaultList: EKCalendar? { EKCalendar(for: .reminder, eventStore: eventStore) }
 
     func requestAccess() async throws -> Bool { granted }
@@ -17,7 +22,18 @@ final class FakeReminderStore: ReminderStoring {
     func save(_ reminder: EKReminder) throws {
         saveCalls += 1
         savedReminder = reminder
-        throw NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "simulated save failure"])
+        if shouldFailSave {
+            throw NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "simulated save failure"])
+        }
+    }
+    func reminder(identifier: String) -> EKReminder? { identifier == "test-id" ? existingReminder : nil }
+    func remove(_ reminder: EKReminder) throws {
+        removeCalls += 1
+        removedReminder = reminder
+        if shouldFailRemove {
+            throw NSError(domain: "test", code: 2, userInfo: [NSLocalizedDescriptionKey: "simulated remove failure"])
+        }
+        existingReminder = nil
     }
     func fetchReminders(matching predicate: NSPredicate, completion: @escaping @Sendable ([EKReminder]?) -> Void) {
         if callbackOnBackground {
@@ -132,6 +148,88 @@ struct ReminderServiceChecks {
             query: "발표", dueDate: nil, listName: nil, includeCompleted: false
         )
         precondition(backgroundResult.items.isEmpty)
+
+        let updateStore = FakeReminderStore()
+        let existing = EKReminder(eventStore: updateStore.eventStore)
+        existing.calendar = updateStore.defaultList
+        existing.title = "발표 준비"
+        existing.notes = "기존 메모"
+        existing.dueDateComponents = DateComponents(year: 2026, month: 9, day: 29)
+        updateStore.existingReminder = existing
+        let updateService = ReminderService(store: updateStore)
+        let snapshot = try await updateService.snapshot(identifier: "test-id")
+        let updateJSON = """
+        {"proposal_id":"update-1","identifier":"test-id","revision":"\(snapshot.revision ?? "")",
+         "before":{},"after":{},"set":{"title":"새 제목"},"clear":["notes"]}
+        """
+        // The service only needs the revision and patch; the UI receives full before/after snapshots.
+        let beforeJSON = try String(data: JSONEncoder().encode(snapshot), encoding: .utf8)!
+        let updateData = updateJSON.replacingOccurrences(of: "\"before\":{}", with: "\"before\":\(beforeJSON)")
+            .replacingOccurrences(of: "\"after\":{}", with: "\"after\":\(beforeJSON)")
+        let updateProposal = try JSONDecoder().decode(ReminderUpdateProposal.self, from: Data(updateData.utf8))
+        updateStore.shouldFailSave = false
+        _ = try await updateService.update(updateProposal)
+        precondition(updateStore.saveCalls == 1)
+        precondition(existing.title == "새 제목")
+        precondition(existing.notes == nil)
+        precondition(existing.dueDateComponents?.day == 29)
+        do {
+            _ = try await updateService.update(updateProposal)
+            preconditionFailure("stale update was accepted")
+        } catch ReminderService.SaveError.stale {
+            precondition(updateStore.saveCalls == 1)
+        }
+
+        let deniedUpdate = FakeReminderStore()
+        deniedUpdate.existingReminder = existing
+        deniedUpdate.granted = false
+        do {
+            _ = try await ReminderService(store: deniedUpdate).update(updateProposal)
+            preconditionFailure("update permission denial was ignored")
+        } catch ReminderService.SaveError.permission {
+            precondition(deniedUpdate.saveCalls == 0)
+        }
+
+        let deleteStore = FakeReminderStore()
+        let toDelete = EKReminder(eventStore: deleteStore.eventStore)
+        toDelete.calendar = deleteStore.defaultList
+        toDelete.title = "삭제 대상"
+        toDelete.dueDateComponents = DateComponents(year: 2026, month: 9, day: 29)
+        deleteStore.existingReminder = toDelete
+        let deleteService = ReminderService(store: deleteStore)
+        let deleteSnapshot = try await deleteService.snapshot(identifier: "test-id")
+        let deleteBefore = try String(data: JSONEncoder().encode(deleteSnapshot), encoding: .utf8)!
+        let deleteJSON = """
+        {"proposal_id":"delete-1","operation":"delete","identifier":"test-id","revision":"\(deleteSnapshot.revision ?? "")",
+         "before":\(deleteBefore),"after":\(deleteBefore),"set":{},"clear":[]}
+        """
+        let deleteProposal = try JSONDecoder().decode(ReminderUpdateProposal.self, from: Data(deleteJSON.utf8))
+        let staleJSON = deleteJSON.replacingOccurrences(of: deleteSnapshot.revision ?? "", with: "old-revision")
+        let staleProposal = try JSONDecoder().decode(ReminderUpdateProposal.self, from: Data(staleJSON.utf8))
+        do {
+            _ = try await deleteService.delete(staleProposal)
+            preconditionFailure("stale deletion was accepted")
+        } catch ReminderService.SaveError.stale { precondition(deleteStore.removeCalls == 0) }
+        let deniedDelete = FakeReminderStore()
+        deniedDelete.existingReminder = toDelete
+        deniedDelete.granted = false
+        do {
+            _ = try await ReminderService(store: deniedDelete).delete(deleteProposal)
+            preconditionFailure("delete permission denial was ignored")
+        } catch ReminderService.SaveError.permission { precondition(deniedDelete.removeCalls == 0) }
+        deleteStore.shouldFailRemove = true
+        do {
+            _ = try await deleteService.delete(deleteProposal)
+            preconditionFailure("uncertain deletion was ignored")
+        } catch ReminderService.SaveError.uncertain { precondition(deleteStore.removeCalls == 1) }
+        deleteStore.shouldFailRemove = false
+        _ = try await deleteService.delete(deleteProposal)
+        precondition(deleteStore.removeCalls == 2 && deleteStore.existingReminder == nil)
+        precondition(deleteStore.removedReminder === toDelete)
+        do {
+            _ = try await deleteService.delete(deleteProposal)
+            preconditionFailure("duplicate deletion was accepted")
+        } catch ReminderService.SaveError.missing { precondition(deleteStore.removeCalls == 2) }
         print("Reminder service checks passed")
     }
 }

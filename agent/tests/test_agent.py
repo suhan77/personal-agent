@@ -13,6 +13,7 @@ from langchain_community.utilities.duckduckgo_search import DuckDuckGoSearchAPIW
 from pydantic import PrivateAttr
 from personal_agent.__main__ import serve
 from personal_agent.services.chat_service import AgentService
+from personal_agent.services.review_service import ReviewService
 from personal_agent.config.settings import Settings
 from personal_agent.graph.checkpoint import open_checkpointer
 from personal_agent.llm.granite.chat_model import GraniteChatModel
@@ -179,7 +180,7 @@ class ReminderInformationFakeModel(FakeListChatModel):
 
     async def ainvoke(self, messages, *args, **kwargs):
         assert isinstance(messages[0], SystemMessage)
-        assert "미리 알림 등록에는 제목과 날짜가 필수" in messages[0].content
+        assert "새 미리 알림 등록에만 제목과 날짜가 필수" in messages[0].content
         inputs = [message.content for message in messages if isinstance(message, HumanMessage)]
         if len(inputs) == 1:
             return AIMessage(content="필수: 제목, 날짜. 선택: 시간, 메모, URL, 목록, 반복, 우선순위.")
@@ -225,16 +226,16 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 state = await service.graph.aget_state({"configurable": {"thread_id": proposal["conversation_id"]}})
                 self.assertIn("review_reminder", state.next)
                 with self.assertRaisesRegex(ValueError, "identifier"):
-                    await service.resume_reminder(proposal["conversation_id"], {"status": "saved", "proposal_id": proposal_id})
+                    await ReviewService(service.graph).resume_reminder_creation(proposal["conversation_id"], {"status": "saved", "proposal_id": proposal_id})
                 with self.assertRaisesRegex(ValueError, "does not match"):
-                    await service.resume_reminder(proposal["conversation_id"], {"status": "rejected", "proposal_id": "wrong"})
+                    await ReviewService(service.graph).resume_reminder_creation(proposal["conversation_id"], {"status": "rejected", "proposal_id": "wrong"})
                 result = {"status": "saved", "proposal_id": proposal_id, "identifier": "test-id"}
-                final = await service.resume_reminder(proposal["conversation_id"], result)
+                final = await ReviewService(service.graph).resume_reminder_creation(proposal["conversation_id"], result)
                 self.assertIn("저장에 성공", final.answer)
                 self.assertIn("test-id", final.answer)
                 state = await service.graph.aget_state({"configurable": {"thread_id": proposal["conversation_id"]}})
                 self.assertIsNone(state.values["active_workflow"])
-                repeated = await service.resume_reminder(proposal["conversation_id"], result)
+                repeated = await ReviewService(service.graph).resume_reminder_creation(proposal["conversation_id"], result)
                 self.assertEqual(repeated.answer, final.answer)
 
     async def test_reminder_rejection_does_not_claim_saved(self):
@@ -242,7 +243,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             async with open_checkpointer(Path(directory) / "checkpoints.sqlite") as saver:
                 service = AgentService(ReminderFakeModels(), saver)
                 proposal = await service.run(AgentRequest(message="알림 등록해줘"))
-                final = await service.resume_reminder(proposal["conversation_id"], {"status": "rejected", "proposal_id": proposal["reminder"]["proposal_id"]})
+                final = await ReviewService(service.graph).resume_reminder_creation(proposal["conversation_id"], {"status": "rejected", "proposal_id": proposal["reminder"]["proposal_id"]})
                 self.assertIn("저장되지 않았습니다", final.answer)
 
     async def test_reminder_pending_review_survives_restart(self):
@@ -255,7 +256,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 service = AgentService(ReminderFakeModels(), saver)
                 state = await service.graph.aget_state({"configurable": {"thread_id": proposal["conversation_id"]}})
                 self.assertIn("review_reminder", state.next)
-                final = await service.resume_reminder(proposal["conversation_id"], {
+                final = await ReviewService(service.graph).resume_reminder_creation(proposal["conversation_id"], {
                     "status": "confirmed_not_saved", "proposal_id": proposal["reminder"]["proposal_id"]
                 })
                 self.assertIn("등록되지 않았음", final.answer)
@@ -265,7 +266,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
             async with open_checkpointer(Path(directory) / "checkpoints.sqlite") as saver:
                 service = AgentService(ReminderFakeModels(), saver)
                 proposal = await service.run(AgentRequest(message="알림 등록해줘"))
-                final = await service.resume_reminder(proposal["conversation_id"], {
+                final = await ReviewService(service.graph).resume_reminder_creation(proposal["conversation_id"], {
                     "status": "failed", "proposal_id": proposal["reminder"]["proposal_id"],
                     "error": "미리 알림 접근 권한이 없습니다",
                 })
@@ -279,8 +280,8 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 proposal = await service.run(AgentRequest(message="알림 등록해줘"))
                 result = {"status": "saved", "proposal_id": proposal["reminder"]["proposal_id"], "identifier": "saved-id"}
                 with self.assertRaisesRegex(RuntimeError, "temporary model failure"):
-                    await service.resume_reminder(proposal["conversation_id"], result)
-                final = await service.resume_reminder(proposal["conversation_id"], result)
+                    await ReviewService(service.graph).resume_reminder_creation(proposal["conversation_id"], result)
+                final = await ReviewService(service.graph).resume_reminder_creation(proposal["conversation_id"], result)
                 self.assertIn("saved-id", final.answer)
 
     async def test_web_search_returns_sources_to_model(self):
@@ -307,7 +308,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(proposal["type"], "file_edit_proposal")
                 self.assertIn("+new", proposal["diff"])
                 self.assertEqual(target.read_text(), "old")
-                await service.resume(proposal["conversation_id"], "reject")
+                await ReviewService(service.graph).resume_file_change(proposal["conversation_id"], "reject")
                 self.assertEqual(target.read_text(), "old")
 
     async def test_update_rejects_stale_file(self):
@@ -320,7 +321,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 proposal = await service.run(AgentRequest(message="바꿔줘", working_directory=str(root)))
                 target.write_text("external edit", encoding="utf-8")
                 with self.assertRaisesRegex(ValueError, "changed after review"):
-                    await service.resume(proposal["conversation_id"], "approve")
+                    await ReviewService(service.graph).resume_file_change(proposal["conversation_id"], "approve")
                 self.assertEqual(target.read_text(), "external edit")
 
     async def test_update_applies_only_after_approval(self):
@@ -332,7 +333,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 service = AgentService(FileUpdatingFakeModels(), saver)
                 proposal = await service.run(AgentRequest(message="바꿔줘", working_directory=str(root)))
                 self.assertEqual(target.read_text(), "old")
-                result = await service.resume(proposal["conversation_id"], "approve")
+                result = await ReviewService(service.graph).resume_file_change(proposal["conversation_id"], "approve")
                 self.assertEqual(result.answer, "변경 검토가 끝났습니다.")
                 self.assertEqual(target.read_text(), "new")
 
@@ -382,7 +383,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 ))
                 self.assertEqual(response["type"], "file_edit_proposal")
                 self.assertFalse((working_directory / "note.txt").exists())
-                final = await service.resume(response["conversation_id"], "approve")
+                final = await ReviewService(service.graph).resume_file_change(response["conversation_id"], "approve")
 
             self.assertEqual(final.answer, "note.txt 파일을 만들었습니다.")
             self.assertEqual((working_directory / "note.txt").read_text(), "테스트 내용")

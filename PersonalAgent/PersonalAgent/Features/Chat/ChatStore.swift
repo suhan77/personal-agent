@@ -105,7 +105,8 @@ final class ChatStore: ObservableObject {
         guard let conversationID = selectedConversationID,
               let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
         guard !conversations[index].messages.contains(where: {
-            $0.proposal?.status == .pending || ($0.reminderProposal.map { $0.status == .pending || $0.status == .saving || !$0.resultDelivered } ?? false)
+            $0.proposal?.status == .pending || ($0.reminderProposal.map { $0.status == .pending || $0.status == .saving || !$0.resultDelivered } ?? false) ||
+            ($0.reminderUpdateProposal.map { $0.status == .pending || $0.status == .saving || !$0.resultDelivered } ?? false)
         }) else { return }
 
         let userMessage = ChatMessage(role: .user, content: text)
@@ -246,6 +247,137 @@ final class ChatStore: ObservableObject {
         conversations.first(where: { $0.id == conversationID })?.messages.first(where: { $0.id == messageID })?.reminderProposal
     }
 
+    func reviewReminderUpdateProposal(_ messageID: UUID, approve: Bool) {
+        guard !isGeneratingReply, let conversationID = selectedConversationID,
+              let proposal = reminderUpdate(messageID, in: conversationID), proposal.status == .pending else { return }
+        let action = proposal.operation == .delete ? "삭제" : "수정"
+        isGeneratingReply = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isGeneratingReply = false }
+            if approve {
+                do { try self.updateReminderUpdate(messageID, in: conversationID, status: .saving) }
+                catch {
+                    self.appendReply("\(action) 전 상태 기록에 실패해 미리 알림을 변경하지 않았습니다: \(error.localizedDescription)", to: conversationID)
+                    return
+                }
+                do {
+                    if proposal.operation == .delete {
+                        _ = try await self.reminders.delete(proposal)
+                    } else {
+                        _ = try await self.reminders.update(proposal)
+                    }
+                    try self.updateReminderUpdate(messageID, in: conversationID, status: .approved)
+                } catch {
+                    if case ReminderService.SaveError.uncertain = error {
+                        try? self.updateReminderUpdate(messageID, in: conversationID, status: .saving, failure: error.localizedDescription)
+                        self.appendReply("\(action) 결과를 확인할 수 없습니다. 미리 알림 앱을 확인한 뒤 카드에서 결과를 선택해 주세요. 자동으로 다시 실행하지 않습니다.", to: conversationID)
+                        return
+                    }
+                    if self.reminderUpdate(messageID, in: conversationID)?.status == .saving,
+                       !(error is ReminderService.SaveError) {
+                        try? self.updateReminderUpdate(messageID, in: conversationID, status: .saving, failure: error.localizedDescription)
+                        self.appendReply("\(action) 결과 기록에 실패했습니다. 미리 알림 앱에서 확인해 주세요. 자동으로 다시 실행하지 않습니다.", to: conversationID)
+                        return
+                    }
+                    do { try self.updateReminderUpdate(messageID, in: conversationID, status: .failed, failure: error.localizedDescription) }
+                    catch {
+                        self.appendReply("실패 결과를 기록하지 못했습니다. 앱에서 \(action) 여부를 확인해 주세요.", to: conversationID)
+                        return
+                    }
+                }
+            } else {
+                do { try self.updateReminderUpdate(messageID, in: conversationID, status: .rejected) }
+                catch {
+                    self.appendReply("거부 결과를 기록하지 못했습니다: \(error.localizedDescription)", to: conversationID)
+                    return
+                }
+            }
+            await self.deliverReminderUpdateResult(messageID, in: conversationID)
+        }
+    }
+
+    func retryReminderUpdateResult(_ messageID: UUID) {
+        guard !isGeneratingReply, let conversationID = selectedConversationID,
+              let proposal = reminderUpdate(messageID, in: conversationID),
+              proposal.status != .pending, proposal.status != .saving, !proposal.resultDelivered else { return }
+        isGeneratingReply = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isGeneratingReply = false }
+            await self.deliverReminderUpdateResult(messageID, in: conversationID)
+        }
+    }
+
+    func resolveUncertainReminderUpdate(_ messageID: UUID, wasUpdated: Bool) {
+        guard !isGeneratingReply, let conversationID = selectedConversationID,
+              let proposal = reminderUpdate(messageID, in: conversationID), proposal.status == .saving else { return }
+        let action = proposal.operation == .delete ? "삭제" : "수정"
+        isGeneratingReply = true
+        Task { [weak self] in
+            guard let self else { return }
+            defer { self.isGeneratingReply = false }
+            do {
+                try self.updateReminderUpdate(messageID, in: conversationID, status: wasUpdated ? .approved : .failed,
+                                              failure: wasUpdated ? "사용자가 미리 알림 앱에서 \(action)됨을 확인함" : "사용자가 미리 알림 앱에서 \(action)되지 않았음을 확인함")
+                await self.deliverReminderUpdateResult(messageID, in: conversationID)
+            } catch {
+                self.appendReply("확인 결과를 기록하지 못했습니다: \(error.localizedDescription)", to: conversationID)
+            }
+        }
+    }
+
+    private func reminderUpdate(_ messageID: UUID, in conversationID: UUID) -> ReminderUpdateProposal? {
+        conversations.first(where: { $0.id == conversationID })?.messages.first(where: { $0.id == messageID })?.reminderUpdateProposal
+    }
+
+    private func updateReminderUpdate(_ messageID: UUID, in conversationID: UUID, status: ReminderProposal.Status,
+                                      failure: String? = nil) throws {
+        guard let index = conversations.firstIndex(where: { $0.id == conversationID }),
+              let messageIndex = conversations[index].messages.firstIndex(where: { $0.id == messageID }),
+              let previous = conversations[index].messages[messageIndex].reminderUpdateProposal else { return }
+        conversations[index].messages[messageIndex].reminderUpdateProposal?.status = status
+        conversations[index].messages[messageIndex].reminderUpdateProposal?.failureMessage = failure
+        do { try persist() }
+        catch {
+            conversations[index].messages[messageIndex].reminderUpdateProposal = previous
+            throw error
+        }
+    }
+
+    private func deliverReminderUpdateResult(_ messageID: UUID, in conversationID: UUID) async {
+        guard let proposal = reminderUpdate(messageID, in: conversationID) else { return }
+        let status: String
+        switch proposal.status {
+        case .approved:
+            if proposal.operation == .delete {
+                status = proposal.failureMessage == nil ? "deleted" : "confirmed_deleted"
+            } else {
+                status = proposal.failureMessage == nil ? "saved" : "confirmed_saved"
+            }
+        case .rejected: status = "rejected"
+        case .failed:
+            let manuallyNotChanged = proposal.failureMessage?.contains("되지 않았음을 확인함") == true ||
+                proposal.failureMessage?.contains("미수정을 확인함") == true
+            status = manuallyNotChanged ? (proposal.operation == .delete ? "confirmed_not_deleted" : "confirmed_not_saved") : "failed"
+        default: return
+        }
+        let result = AgentProcessService.ReminderReviewResult(proposal_id: proposal.proposalID, status: status,
+                                                               identifier: ["saved", "deleted"].contains(status) ? proposal.identifier : nil,
+                                                               error: proposal.failureMessage)
+        do {
+            let reply = try await agent.reviewReminderUpdate(conversationID: conversationID, result: result)
+            if let index = conversations.firstIndex(where: { $0.id == conversationID }),
+               let messageIndex = conversations[index].messages.firstIndex(where: { $0.id == messageID }) {
+                conversations[index].messages[messageIndex].reminderUpdateProposal?.resultDelivered = true
+                save()
+            }
+            appendResult(reply, to: conversationID)
+        } catch {
+            appendReply("결과 전달에 실패했습니다. 카드의 ‘결과 전달 재시도’를 눌러 주세요: \(error.localizedDescription)", to: conversationID)
+        }
+    }
+
     private func updateReminder(_ messageID: UUID, in conversationID: UUID, status: ReminderProposal.Status,
                                 identifier: String? = nil, failure: String? = nil) throws {
         guard let index = conversations.firstIndex(where: { $0.id == conversationID }),
@@ -295,6 +427,13 @@ final class ChatStore: ObservableObject {
         case .reminder(let proposal):
             guard let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
             conversations[index].messages.append(ChatMessage(role: .assistant, content: "다음 미리 알림을 등록할까요? 내용을 확인한 뒤 승인해 주세요.", reminderProposal: proposal))
+            save()
+        case .reminderUpdate(let proposal):
+            guard let index = conversations.firstIndex(where: { $0.id == conversationID }) else { return }
+            let content = proposal.operation == .delete
+                ? "다음 미리 알림을 삭제할까요? 대상을 확인한 뒤 승인해 주세요."
+                : "다음 미리 알림을 수정할까요? 변경 전후를 확인한 뒤 승인해 주세요."
+            conversations[index].messages.append(ChatMessage(role: .assistant, content: content, reminderUpdateProposal: proposal))
             save()
         }
     }
