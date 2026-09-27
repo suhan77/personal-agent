@@ -20,3 +20,5 @@ class LogMessages:
     TOOL_CALLS_DETECTED = "도구 호출 확인 | 개수=%d | 이름=%s"
     ROUTE_SELECTED = "그래프 분기 | 다음=%s"
     MODEL_RAW_RESPONSE = "모델 원시 응답 | %r"
+    MODEL_PROMPT_TOKENS = "모델 입력 | %d토큰"
+    MODEL_OUTPUT_LENGTH = "모델 출력 | %d자"

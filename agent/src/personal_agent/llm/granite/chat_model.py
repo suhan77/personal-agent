@@ -1,3 +1,5 @@
+import logging
+
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult, LLMResult
 from langchain_core.tools import BaseTool
@@ -5,9 +7,12 @@ from langchain_core.utils.function_calling import convert_to_openai_tool
 from pydantic import PrivateAttr
 
 from personal_agent.config.settings import Settings
+from personal_agent.common.log_messages import LogMessages
 from personal_agent.llm.granite.llm_config import GraniteLLMConfig
 from personal_agent.llm.granite.tool_call_parser import parse_tool_calls
 from personal_agent.llm.huggingface_llm import LocalHuggingFaceChatModel, load_local_pipeline
+
+logger = logging.getLogger(__name__)
 
 
 class GraniteChatModel(LocalHuggingFaceChatModel):
@@ -40,13 +45,15 @@ class GraniteChatModel(LocalHuggingFaceChatModel):
             raise ValueError("At least one message is required.")
 
         message_dicts = [self._to_chatml_format(message) for message in messages]
-        return self.tokenizer.apply_chat_template(
+        prompt = self.tokenizer.apply_chat_template(
             message_dicts,
             tokenize=False,
             add_generation_prompt=True,
             enable_thinking=self.enable_thinking,
             tools=self._bound_tools or None,
         )
+        logger.info(LogMessages.MODEL_PROMPT_TOKENS, len(self.tokenizer.encode(prompt)))
+        return prompt
 
     @staticmethod
     def _to_chatml_format(message: BaseMessage) -> dict[str, object]:
@@ -82,6 +89,7 @@ class GraniteChatModel(LocalHuggingFaceChatModel):
     def _to_chat_result(llm_result: LLMResult) -> ChatResult:
         chat_generations = []
         for generation in llm_result.generations[0]:
+            logger.info(LogMessages.MODEL_OUTPUT_LENGTH, len(generation.text))
             content, tool_calls = parse_tool_calls(generation.text)
             chat_generations.append(
                 ChatGeneration(
