@@ -5,26 +5,25 @@ build-backend = "hatchling.build"
 [project]
 name = "personal-agent-agent"
 version = "0.1.0"
-description = "LangChain and LangGraph AI capabilities for PersonalAgent"
+description = "Local Hugging Face agent called directly by Swift"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = "==3.13.*"
 dependencies = [
-    "langchain>=1.0",
-    "langgraph>=1.0",
+    "accelerate>=1.15.0",
+    "aiosqlite>=0.22.1",
+    "langchain-core>=1.0",
+    "langchain-huggingface>=1.2.2",
+    "langgraph>=1.2.11",
+    "langgraph-checkpoint-sqlite>=3.1.1",
+    "langmem>=0.0.30",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.15.0",
+    "torch>=2.14.0",
+    "transformers>=5.17.0",
 ]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=8.0",
-    "ruff>=0.8",
-]
+[project.scripts]
+personal-agent = "personal_agent.__main__:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/personal_agent_agent"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-
-[tool.ruff]
-target-version = "py311"
-line-length = 100
+packages = ["src/personal_agent"]

@@ -1,0 +1,20 @@
+"""Shared log message labels."""
+
+
+class LogMessages:
+    REQUEST_STARTED = "[요청] id=%s | model=%s | 입력 %d자"
+    REQUEST_COMPLETED = "[요청 종료] id=%s | %s"
+    MODEL_INITIALIZATION = "모델 초기화 (앱 시작)"
+    GRAPH_INITIALIZATION = "대화 저장소 및 그래프 준비 (앱 시작)"
+    REQUEST_PROCESSING = "요청 처리"
+    FULL_CONVERSATION = "대화 처리 전체"
+    HISTORY_SUMMARIZATION = "대화 이력 확인 및 필요 시 요약"
+    GENERATION = "답변 생성 (GPU 추론)"
+    TOKENIZER_LOADING = "토크나이저 불러오기"
+    MODEL_LOADING = "모델 가중치 불러오기 및 GPU 배치"
+    PIPELINE_INITIALIZATION = "생성 파이프라인 준비"
+    DIRECTORY_LISTING = "디렉터리 조회 | 경로=%s | 항목=%d개"
+    DIRECTORY_TOOL = "디렉터리 조회 도구 실행"
+    TOOL_CALLS_DETECTED = "도구 호출 확인 | 개수=%d | 이름=%s"
+    ROUTE_SELECTED = "그래프 분기 | 다음=%s"
+    MODEL_RAW_RESPONSE = "모델 원시 응답 | %r"

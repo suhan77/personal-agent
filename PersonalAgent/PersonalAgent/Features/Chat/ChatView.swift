@@ -18,6 +18,23 @@ struct ChatView: View {
             }
         }
         .navigationTitle(chatStore.selectedConversation?.title ?? "Personal Agent")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                HStack(spacing: 8) {
+                    Text(chatStore.workingDirectory?.lastPathComponent ?? "없음")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    Button(action: chatStore.chooseWorkingDirectory) {
+                        Image(systemName: "folder")
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.bordered)
+                    .clipShape(Circle())
+                }
+            }
+        }
     }
 }
 
@@ -38,7 +55,7 @@ private struct MessageList: View {
                         HStack(spacing: 8) {
                             ProgressView()
                                 .controlSize(.small)
-                            Text("Mock Agent가 답변을 작성하고 있습니다…")
+                            Text("로컬 모델이 답변을 준비하고 있습니다…")
                                 .foregroundStyle(.secondary)
                             Spacer()
                         }
@@ -109,8 +126,16 @@ private struct Composer: View {
             TextField("메시지를 입력하세요", text: $chatStore.draft, axis: .vertical)
                 .textFieldStyle(.plain)
                 .lineLimit(1...5)
+                .submitLabel(.send)
                 .focused($isFocused)
-                .onSubmit(chatStore.sendDraft)
+                .onKeyPress(.return, phases: .down) { keyPress in
+                    if keyPress.modifiers.contains(.shift) {
+                        chatStore.draft.append("\n")
+                    } else {
+                        chatStore.sendDraft()
+                    }
+                    return .handled
+                }
 
             Button(action: chatStore.sendDraft) {
                 Image(systemName: "arrow.up")

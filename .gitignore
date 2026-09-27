@@ -18,3 +18,10 @@ venv/
 .pytest_cache/
 .ruff_cache/
 
+
+# Local configuration and conversation data
+.env
+.env.*
+!.env.example
+*.sqlite*
+agent/data/

@@ -1,129 +1,75 @@
 # Personal Agent for macOS
 
-Mac에서 로컬로 실행되는 개인 AI 에이전트입니다. ChatGPT처럼 대화하고, 모든 대화 내용과 모델 데이터는 사용자의 Mac 안에서 처리합니다.
+SwiftUI 화면과 로컬 Python 에이전트를 하나의 저장소에서 관리합니다. Swift가 `Process`로 Python을 실행하고 표준입출력(JSON Lines)으로 요청합니다. FastAPI와 별도 웹 서버는 필요하지 않습니다.
 
-## 실행 방법
+## 준비 및 실행
 
-현재 버전은 Mock Agent가 포함된 SwiftUI macOS 앱입니다. Xcode 26 이상이 설치된 Mac에서 실행할 수 있습니다.
+1. Apple Silicon Mac에 Xcode와 uv를 설치합니다.
+2. 저장소 루트에서 Python 환경을 준비합니다.
 
-1. [PersonalAgent.xcodeproj](/Users/jeonsuhan/dev/personal_agent/PersonalAgent/PersonalAgent.xcodeproj)를 Xcode로 엽니다.
-2. 상단 Scheme에서 `PersonalAgent`와 `My Mac`을 선택합니다.
-3. `⌘R`을 눌러 빌드하고 실행합니다.
+   ```bash
+   cd agent
+   uv sync
+   cp .env.example .env
+   ```
 
-터미널에서 Debug 빌드만 확인하려면 프로젝트 루트에서 다음을 실행합니다.
+3. `agent/.env`의 `MODEL_DIR`를 확인합니다. 기본값은 `/Volumes/sh_disk/model`이며 그 아래 `granite-4.2-3b` 모델 파일이 있어야 합니다.
+4. `PersonalAgent/PersonalAgent.xcodeproj`를 Xcode에서 열고 `PersonalAgent` / `My Mac`으로 실행합니다.
+
+앱을 실행하면 백그라운드에서 Python 워커, 라이브러리, 모델, 그래프 및 체크포인트 저장소를 미리 준비합니다. 따라서 첫 메시지에서 모델을 메모리에 올리는 대기 시간은 발생하지 않습니다. 초기화 중 입력된 첫 메시지는 워커가 준비될 때까지 대기한 뒤 처리됩니다. 이후에는 같은 Python 프로세스와 모델을 재사용합니다. 오류는 대화창에 표시하며 자세한 로그는 Xcode 콘솔에서 확인합니다. 10분 동안 응답이 없으면 프로세스를 종료하며 다음 요청에서 다시 시작합니다.
+
+## 구조
+
+```text
+personal-agent/
+├── PersonalAgent/                 # 기존 SwiftUI macOS 앱
+│   ├── PersonalAgent.xcodeproj
+│   └── PersonalAgent/
+│       ├── App/
+│       ├── Features/              # 채팅 / 대화 목록
+│       ├── Models/
+│       └── Services/AgentProcessService.swift
+└── agent/
+    ├── pyproject.toml
+    ├── uv.lock
+    └── src/personal_agent/
+        ├── __main__.py            # JSON Lines 요청 루프
+        ├── chat_service.py        # LangGraph 실행
+        ├── config/
+        ├── schemas/
+        └── modules/
+            ├── langchain/         # 실제 Hugging Face 모델 로딩
+            └── langgraph/         # 이력 요약, 생성, SQLite 체크포인트
+```
+
+`personal_agent` 프로젝트의 Granite 로딩, 프롬프트, 생성 설정, LangGraph, LangMem 요약 및 SQLite 체크포인트 코드를 가져왔습니다. API 라우터, FastAPI, Uvicorn 및 현재 에이전트에서 사용하지 않는 도구 의존성은 포함하지 않습니다.
+
+Swift는 대화 UUID와 새 메시지를 전송하고 Python이 해당 UUID의 이력을 관리합니다. 새 대화는 별도 UUID를 사용합니다. 화면의 대화 목록은 아직 메모리에만 유지되므로 앱을 다시 열었을 때 이전 대화를 복원하는 기능은 없습니다. Python 체크포인트는 디스크에 유지됩니다.
+
+개발 실행 시 Swift 소스 경로를 기준으로 같은 저장소의 `agent/.venv/bin/python`을 찾습니다. 필요하면 Xcode Scheme 환경 변수 `PERSONAL_AGENT_DIR`(agent 폴더 절대 경로), `PERSONAL_AGENT_PYTHON`(Python 실행 파일 절대 경로)으로 변경할 수 있습니다. 현재는 개발용 로컬 환경이며 Python 런타임·모델을 포함한 배포용 앱 번들 구성은 별도 작업입니다.
+
+프로토콜 및 설정은 [agent/README.md](agent/README.md)를 참고하세요.
+
+## 검증
 
 ```bash
-xcodebuild \
+cd agent
+uv run python -m unittest discover -s tests
+```
+
+저장소 루트에서 macOS 앱 빌드:
+
+```bash
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
   -project PersonalAgent/PersonalAgent.xcodeproj \
-  -scheme PersonalAgent \
-  -configuration Debug \
-  -derivedDataPath /tmp/personal-agent-derived \
-  build CODE_SIGNING_ALLOWED=NO
+  -scheme PersonalAgent -configuration Debug \
+  -derivedDataPath /tmp/personal-agent-derived build CODE_SIGNING_ALLOWED=NO
 ```
 
-빌드된 앱은 다음 명령으로 열 수 있습니다.
+Xcode 실행 시 앱용 Metal 검사 및 라이브러리 주입 환경 변수는 Python 프로세스에 전달하지 않습니다. PyTorch MPS가 Xcode의 Metal 검사 계층에서 강제 종료되는 것을 방지하며, Swift 앱 자체의 디버그 설정은 그대로 유지합니다.
 
-```bash
-open /tmp/personal-agent-derived/Build/Products/Debug/PersonalAgent.app
-```
+## Xcode 시작 시 시스템 로그
 
-## 핵심 구조
+공유 `PersonalAgent` Scheme의 Run 환경 변수에 `OS_ACTIVITY_MODE=disable`을 설정했습니다. macOS의 Intents/autoShortcut, ViewBridge 등에서 나오는 시스템 통합 로그를 Xcode 실행 중 숨깁니다. 시스템 서비스 자체의 연결 문제를 고치는 설정은 아니며, 해당 실행의 다른 `OSLog` 출력도 함께 숨깁니다. Python의 stderr 기반 단계별 시간 로그와 오류/traceback은 그대로 표시됩니다. Finder 실행이나 Archive/Profile에는 이 설정이 적용되지 않습니다.
 
-이 프로젝트는 **하나의 SwiftUI macOS 앱 프로젝트**로 관리합니다.
-
-```text
-PersonalAgent.app
-├─ SwiftUI / Swift
-│  ├─ 채팅 화면, 대화 목록, 설정 화면
-│  ├─ 대화·메시지·설정 관리
-│  ├─ SQLite 저장·조회
-│  └─ Python Agent 프로세스 실행·통신
-│
-└─ Python Agent (앱 번들에 포함)
-   ├─ LangChain
-   ├─ LangGraph
-   └─ 로컬 LLM으로 답변 생성
-```
-
-Python은 별도 백엔드 서버가 아닙니다. Swift 앱이 시작할 때 하나의 로컬 Python 프로세스로 실행되며, 모델을 한 번만 메모리에 올린 뒤 요청을 처리합니다.
-
-## 역할 분리
-
-| 구성 요소 | 기술 | 책임 |
-| --- | --- | --- |
-| 화면 | SwiftUI | 채팅 UI, 대화 목록, 입력창, 설정, macOS 사용자 경험 |
-| 앱 로직 | Swift | 대화 생성·선택·삭제, 메시지 흐름, 앱 상태 관리 |
-| 데이터 저장 | Swift + SQLite | 대화, 메시지, 설정을 로컬에 영속 저장 |
-| AI 엔진 | Python + LangChain/LangGraph | 대화 이력으로 로컬 LLM을 실행하고 AI 답변 생성 |
-| 연결 | Swift `Process` + JSON Lines | Swift와 장기 실행 Python Agent 간 요청·응답 통신 |
-
-SwiftUI는 Swift의 UI 프레임워크입니다. 즉, 화면만 SwiftUI로 만들고 그 밖의 앱 기능은 모두 Swift로 작성합니다.
-
-## 메시지 흐름
-
-```text
-사용자 입력 (SwiftUI)
-  → Swift: 사용자 메시지를 SQLite에 저장
-  → Swift: 대화 이력과 새 메시지를 Python Agent에 전달
-  → Python: LangGraph / LangChain / 로컬 LLM으로 답변 생성
-  → Swift: AI 답변을 SQLite에 저장
-  → SwiftUI: AI 답변 표시
-```
-
-Swift와 Python은 표준입출력으로 JSON Lines를 주고받습니다. 한 줄이 하나의 JSON 메시지입니다.
-
-```json
-{"type":"generate_reply","conversation_id":"conv_123","messages":[...]}
-```
-
-```json
-{"type":"assistant_reply","conversation_id":"conv_123","content":"안녕하세요!"}
-```
-
-## 예정 프로젝트 구조
-
-```text
-personal_agent/
-├─ README.md
-└─ PersonalAgent/                       # 하나의 Xcode / SwiftUI 프로젝트
-   ├─ PersonalAgent.xcodeproj
-   └─ PersonalAgent/
-      ├─ App/                           # 앱 진입점·전역 상태
-      ├─ Features/
-      │  ├─ Chat/                       # 채팅 화면·ViewModel
-      │  ├─ Conversations/              # 대화 목록 화면·ViewModel
-      │  └─ Settings/                   # 설정 화면
-      ├─ Models/                        # Conversation, Message 등 Swift 모델
-      ├─ Services/
-      │  ├─ ConversationService.swift   # 대화·메시지 관리
-      │  ├─ DatabaseService.swift       # SQLite 접근
-      │  └─ AgentProcessService.swift   # Python 실행·JSON Lines 통신
-      ├─ Persistence/                   # SQLite 스키마·마이그레이션
-      └─ Resources/
-         └─ python_agent/               # 앱 번들에 포함하는 Python 코드
-            ├─ main.py                  # JSON Lines 요청 루프
-            ├─ chat_service.py          # AI 답변 생성 서비스
-            ├─ langchain/               # 모델·프롬프트·콜백
-            └─ langgraph/               # 그래프·상태·노드
-```
-
-개발 중에는 Python 코드를 Xcode 프로젝트 안에서 관리하고, 빌드할 때 앱 리소스로 번들에 포함합니다. 외부 배포 시에는 Python 런타임과 필요한 라이브러리도 앱에 포함해 사용자가 별도 Python을 설치하지 않도록 합니다.
-
-## 로컬 데이터 위치
-
-앱 번들 내부에는 사용자 데이터를 저장하지 않습니다. 업데이트 후에도 데이터를 보존하기 위해 다음 위치를 사용합니다.
-
-```text
-~/Library/Application Support/PersonalAgent/
-├─ personal_agent.sqlite    # 대화, 메시지, 설정
-├─ models/                  # 다운로드한 로컬 LLM 모델
-└─ attachments/             # 사용자가 첨부한 파일
-```
-
-## 첫 번째 버전의 완료 기준
-
-1. SwiftUI에서 새 대화를 만들고 메시지를 보낼 수 있다.
-2. Swift가 SQLite에 대화와 메시지를 저장한다.
-3. Swift가 앱 내부의 Python Agent에 대화 이력을 전달한다.
-4. Python Agent가 로컬 LLM으로 답변을 생성한다.
-5. SwiftUI에서 이전 대화를 열어 이어서 대화할 수 있다.
+변경 후 실행을 중지하고 Xcode에서 `PersonalAgent` Scheme으로 다시 실행하세요. 시스템 통합 로그를 조사해야 할 때는 Edit Scheme → Run → Arguments에서 이 환경 변수를 끄면 됩니다.

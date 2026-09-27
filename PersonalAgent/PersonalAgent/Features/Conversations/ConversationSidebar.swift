@@ -10,6 +10,19 @@ struct ConversationSidebar: View {
                     Label(conversation.title, systemImage: "message")
                         .tag(conversation.id)
                         .lineLimit(1)
+                        .contextMenu {
+                            Button(role: .destructive) {
+                                chatStore.deleteConversation(conversation.id)
+                            } label: {
+                                Label("대화 삭제", systemImage: "trash")
+                            }
+                        }
+                }
+                .onDelete { offsets in
+                    let conversationIDs = offsets.map { chatStore.conversations[$0].id }
+                    for conversationID in conversationIDs {
+                        chatStore.deleteConversation(conversationID)
+                    }
                 }
             }
         }
