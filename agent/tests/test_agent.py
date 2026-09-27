@@ -397,7 +397,7 @@ class AgentTests(unittest.IsolatedAsyncioTestCase):
                 requests.append(json.dumps({"id": str(i), "type": "generate_reply", "message": "안녕"}))
             output = io.StringIO()
             with patch("personal_agent.config.settings.get_settings", return_value=settings), patch(
-                "personal_agent.services.agent_runtime.ChatModels", side_effect=FakeModels
+                "personal_agent.runtime.ChatModels", side_effect=FakeModels
             ) as models:
                 await serve(io.StringIO("\n".join(requests) + "\n"), output)
                 self.assertEqual(models.call_count, 1)

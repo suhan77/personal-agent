@@ -1,4 +1,5 @@
 """Application runtime for the long-lived local agent worker."""
+
 import asyncio
 from contextlib import AsyncExitStack
 import logging

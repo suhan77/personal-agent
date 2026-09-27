@@ -5,7 +5,7 @@ import logging
 import sys
 
 from personal_agent.common.logging import configure_logging
-from personal_agent.services.agent_runtime import AgentRuntime
+from personal_agent.runtime import AgentRuntime
 from personal_agent.services.native_tool_bridge import NativeToolBridge, native_tool_context
 
 
