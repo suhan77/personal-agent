@@ -34,6 +34,9 @@ class NativeToolBridge:
         except TimeoutError as exc:
             logger.error("macOS 도구 응답 시간 초과 | name=%s | call_id=%s", tool, call_id)
             raise TimeoutError(f"{tool} 도구의 macOS 응답이 {timeout:g}초 안에 오지 않았습니다") from exc
+        except Exception as exc:
+            logger.error("macOS 도구 실패 | name=%s | call_id=%s | error=%s", tool, call_id, exc)
+            raise
         finally:
             self._pending.pop(call_id, None)
 

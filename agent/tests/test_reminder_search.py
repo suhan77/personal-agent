@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.utils.function_calling import convert_to_openai_tool
-from pydantic import PrivateAttr, ValidationError
+from pydantic import PrivateAttr
 
 from personal_agent.__main__ import serve
 from personal_agent.graph.checkpoint import open_checkpointer
@@ -142,9 +142,8 @@ class ReminderSearchTests(unittest.IsolatedAsyncioTestCase):
                          ["native_tool_request", "assistant_reply"])
         self.assertEqual(output_stream.events[-1]["answer"], "발표 준비")
 
-    async def test_rejects_blank_search_and_mismatched_tool_result(self):
-        with self.assertRaises(ValidationError):
-            ReminderSearchInput.model_validate({"query": "   "})
+    async def test_allows_blank_search_and_ignores_mismatched_tool_result(self):
+        self.assertEqual(ReminderSearchInput.model_validate({"query": "   "}).query, "")
         bridge = None
         events = []
 
@@ -158,8 +157,11 @@ class ReminderSearchTests(unittest.IsolatedAsyncioTestCase):
 
         bridge = NativeToolBridge(emit)
         with native_tool_context(bridge, "parent"):
-            self.assertEqual(await find_reminders.ainvoke({"query": "발표"}), {"items": [], "truncated": False})
+            self.assertEqual(await find_reminders.ainvoke({"query": "", "due_date": "2026-09-30"}),
+                             {"items": [], "truncated": False})
         self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["arguments"]["query"], "")
+        self.assertEqual(events[0]["arguments"]["due_date"], "2026-09-30")
 
     async def test_native_search_permission_error_is_not_treated_as_empty_results(self):
         bridge = None

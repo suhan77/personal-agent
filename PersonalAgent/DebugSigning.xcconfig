@@ -1,0 +1,4 @@
+// Each developer may select a local signing identity without changing the project.
+CODE_SIGN_STYLE = Automatic
+CODE_SIGN_IDENTITY = -
+#include? "DebugSigning.local.xcconfig"

@@ -12,6 +12,9 @@ final class ChatStore: ObservableObject {
     private let agent = AgentProcessService()
     private let reminders = ReminderService()
     private let persistenceURL: URL
+    private var activeGenerationConversationID: Conversation.ID?
+    private var pendingConversationDeletions = Set<Conversation.ID>()
+    private var isFlushingConversationDeletions = false
 
     private struct SavedState: Codable {
         let conversations: [Conversation]
@@ -82,20 +85,21 @@ final class ChatStore: ObservableObject {
     }
 
     func deleteConversation(_ conversationID: Conversation.ID) {
-        guard !isGeneratingReply else { return }
+        guard conversations.contains(where: { $0.id == conversationID }) else { return }
+        // A generation owns the worker until it returns. Remove the chat from
+        // the UI immediately, then clear its checkpoint as soon as the worker
+        // becomes available. Other in-flight operations keep their protection.
+        guard !isGeneratingReply || activeGenerationConversationID != nil else { return }
+        pendingConversationDeletions.insert(conversationID)
         conversations.removeAll { $0.id == conversationID }
         if selectedConversationID == conversationID {
             selectedConversationID = conversations.first?.id
         }
         save()
 
+        guard activeGenerationConversationID == nil else { return }
         Task { [weak self] in
-            guard let self else { return }
-            do {
-                try await agent.deleteConversation(conversationID)
-            } catch {
-                NSLog("대화 이력 삭제 실패: %@", error.localizedDescription)
-            }
+            await self?.flushPendingConversationDeletions()
         }
     }
 
@@ -116,11 +120,11 @@ final class ChatStore: ObservableObject {
         }
         draft = ""
         save()
+        activeGenerationConversationID = conversationID
         isGeneratingReply = true
 
         Task { [weak self] in
             guard let self else { return }
-            defer { self.isGeneratingReply = false }
             do {
                 let result = try await self.agent.reply(
                     to: text,
@@ -131,6 +135,8 @@ final class ChatStore: ObservableObject {
             } catch {
                 self.appendReply("오류: \(error.localizedDescription)", to: conversationID)
             }
+            self.activeGenerationConversationID = nil
+            await self.flushPendingConversationDeletions()
         }
     }
 
@@ -447,6 +453,27 @@ final class ChatStore: ObservableObject {
     private func save() {
         do { try persist() }
         catch { NSLog("대화 저장 실패: %@", error.localizedDescription) }
+    }
+
+    private func flushPendingConversationDeletions() async {
+        guard activeGenerationConversationID == nil, !isFlushingConversationDeletions else { return }
+        isFlushingConversationDeletions = true
+        isGeneratingReply = true
+        defer {
+            isFlushingConversationDeletions = false
+            isGeneratingReply = false
+        }
+
+        while let conversationID = pendingConversationDeletions.first {
+            do {
+                try await agent.deleteConversation(conversationID)
+                pendingConversationDeletions.remove(conversationID)
+                save()
+            } catch {
+                NSLog("대화 이력 삭제 실패: %@", error.localizedDescription)
+                return
+            }
+        }
     }
 
     private func persist() throws {

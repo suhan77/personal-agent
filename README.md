@@ -9,9 +9,12 @@ SwiftUI 화면과 로컬 Python 에이전트를 하나의 저장소에서 관리
 | 로컬 AI 채팅 | 앱 시작 시 Granite 모델 미리 로드, SQLite 대화 이력 및 장기 대화 요약, Swift 대화 목록 저장·복원 | 대화 삭제 시 Python 체크포인트도 삭제 |
 | 작업 폴더와 파일 | macOS에서 작업 폴더 선택, 파일·하위 폴더 목록 조회, UTF-8 텍스트 파일 읽기·생성·수정 | 파일 생성·수정은 변경안 확인 후 승인 필요 |
 | 웹 검색 | DuckDuckGo 검색 결과 조회 | 검색 서비스 상태에 따라 결과가 없거나 실패할 수 있음 |
+| macOS 단축키 | 공통 및 Finder·Spotlight·텍스트 편집별 Markdown 카탈로그에서 관련 항목 안내 | 앱·macOS 버전·키보드 배열 설정에 따라 다를 수 있음 |
 | macOS 미리 알림 | EventKit으로 검색·등록·수정·삭제 | 등록·수정·삭제는 승인 필요. 수정·삭제 대기 중 항목이 변경되면 적용하지 않음 |
 
 미리 알림 등록은 **제목과 날짜**가 필수입니다. 시간·메모·URL·목록·반복(매일/매주/매월/매년)·우선순위는 선택 사항입니다. 긴급, 태그, 깃발, 위치, 메시지 조건, 이미지, 사전 알림은 현재 자동 등록 대상이 아닙니다. 미리 알림 접근 권한은 macOS에서 허용해야 합니다.
+
+macOS 권한이 빌드마다 초기화되지 않도록 Debug 빌드는 `PersonalAgent/DebugSigning.xcconfig`에서 로컬 서명을 지원합니다. 이 Mac의 인증서 선택은 Git에 포함되지 않는 `PersonalAgent/DebugSigning.local.xcconfig`에만 저장합니다. 다른 Mac에서는 자체 코드 서명 인증서를 준비한 뒤 같은 파일에 `CODE_SIGN_STYLE = Manual`과 `CODE_SIGN_IDENTITY = 인증서 이름`을 설정할 수 있습니다. 로컬 인증서를 설정하지 않으면 기존 임시 서명으로 빌드됩니다.
 
 ## 준비 및 실행
 
@@ -52,7 +55,8 @@ personal-agent/
         ├── graph/                 # 생성, 이력 요약, 승인 흐름, 체크포인트
         ├── llm/                   # Hugging Face 모델 로딩과 모델별 설정
         ├── services/              # 채팅, 승인 재개, Swift 도구 브리지
-        ├── tools/                 # 파일, 검색, 미리 알림 도구
+        ├── tools/                 # 파일, 검색, 미리 알림, macOS 단축키 도구
+        ├── data/macos_shortcuts/  # 공통 및 범주별 Markdown 단축키 문서
         ├── config/
         └── schemas/
 ```

@@ -28,3 +28,6 @@ personal-agent = "personal_agent.__main__:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/personal_agent"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/personal_agent/data/macos_shortcuts" = "personal_agent/data/macos_shortcuts"

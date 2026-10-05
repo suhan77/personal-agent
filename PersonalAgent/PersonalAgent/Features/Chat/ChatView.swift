@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct ChatView: View {
@@ -101,7 +102,7 @@ private struct MessageBubble: View {
             }
 
             VStack(alignment: .leading, spacing: 10) {
-                Text(message.content).textSelection(.enabled)
+                MessageContent(message: message)
                 if let proposal = message.proposal {
                     Text(proposal.path).font(.headline)
                     ScrollView(.horizontal) {
@@ -215,6 +216,136 @@ private struct MessageBubble: View {
 
     private var backgroundColor: Color {
         message.role == .user ? .accentColor.opacity(0.18) : .secondary.opacity(0.12)
+    }
+}
+
+private struct MessageContent: View {
+    let message: ChatMessage
+
+    var body: some View {
+        Group {
+            if message.role == .assistant {
+                let blocks = MarkdownBlock.parse(message.content)
+                VStack(alignment: .leading, spacing: 3) {
+                    ForEach(blocks.indices, id: \.self) { index in
+                        MarkdownBlockView(block: blocks[index])
+                    }
+                }
+            } else {
+                Text(message.content)
+            }
+        }
+        .textSelection(.enabled)
+    }
+}
+
+private enum MarkdownBlock {
+    case paragraph(String)
+    case heading(Int, String)
+    case listItem(String, String)
+    case quote(String)
+    case code(String)
+    case spacing
+
+    static func parse(_ source: String) -> [MarkdownBlock] {
+        let lines = source
+            .replacingOccurrences(of: "\r\n", with: "\n")
+            .replacingOccurrences(of: "\r", with: "\n")
+            .components(separatedBy: "\n")
+        var blocks: [MarkdownBlock] = []
+        var index = 0
+
+        while index < lines.count {
+            let line = lines[index]
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+
+            if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
+                let fence = String(trimmed.prefix(3))
+                var codeLines: [String] = []
+                index += 1
+                while index < lines.count && !lines[index].trimmingCharacters(in: .whitespaces).hasPrefix(fence) {
+                    codeLines.append(lines[index])
+                    index += 1
+                }
+                blocks.append(.code(codeLines.joined(separator: "\n")))
+            } else if trimmed.isEmpty {
+                if case .spacing? = blocks.last {
+                    // Consecutive blank lines use a single paragraph gap.
+                } else {
+                    blocks.append(.spacing)
+                }
+            } else if let heading = heading(in: trimmed) {
+                blocks.append(.heading(heading.level, heading.text))
+            } else if let item = listItem(in: trimmed) {
+                blocks.append(.listItem(item.marker, item.text))
+            } else if trimmed.hasPrefix("> ") {
+                blocks.append(.quote(String(trimmed.dropFirst(2))))
+            } else {
+                blocks.append(.paragraph(line))
+            }
+            index += 1
+        }
+        return blocks
+    }
+
+    private static func heading(in line: String) -> (level: Int, text: String)? {
+        let level = line.prefix(while: { $0 == "#" }).count
+        guard (1...6).contains(level), line.dropFirst(level).hasPrefix(" ") else { return nil }
+        return (level, String(line.dropFirst(level + 1)))
+    }
+
+    private static func listItem(in line: String) -> (marker: String, text: String)? {
+        if line.hasPrefix("- ") || line.hasPrefix("* ") || line.hasPrefix("+ ") {
+            return ("•", String(line.dropFirst(2)))
+        }
+        guard let dot = line.firstIndex(of: "."),
+              Int(line[..<dot]) != nil,
+              line[line.index(after: dot)...].hasPrefix(" ") else { return nil }
+        return (String(line[...dot]), String(line[line.index(dot, offsetBy: 2)...]))
+    }
+}
+
+private struct MarkdownBlockView: View {
+    let block: MarkdownBlock
+
+    @ViewBuilder
+    var body: some View {
+        switch block {
+        case .paragraph(let text):
+            Text(inlineMarkdown(text))
+        case .heading(let level, let text):
+            Text(inlineMarkdown(text))
+                .font(level == 1 ? .title2 : level == 2 ? .title3 : .headline)
+                .fontWeight(.semibold)
+        case .listItem(let marker, let text):
+            HStack(alignment: .firstTextBaseline, spacing: 7) {
+                Text(marker)
+                    .frame(minWidth: 18, alignment: .trailing)
+                Text(inlineMarkdown(text))
+            }
+        case .quote(let text):
+            HStack(alignment: .top, spacing: 8) {
+                Rectangle().fill(.secondary).frame(width: 3)
+                Text(inlineMarkdown(text)).foregroundStyle(.secondary)
+            }
+        case .code(let text):
+            ScrollView(.horizontal) {
+                Text(text)
+                    .font(.system(.body, design: .monospaced))
+                    .fixedSize(horizontal: true, vertical: false)
+                    .padding(8)
+            }
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 6))
+        case .spacing:
+            Color.clear.frame(height: 8)
+        }
+    }
+
+    private func inlineMarkdown(_ text: String) -> AttributedString {
+        (try? AttributedString(
+            markdown: text,
+            options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace)
+        )) ?? AttributedString(text)
     }
 }
 

@@ -18,7 +18,16 @@ protocol ReminderStoring {
 final class EventKitReminderStore: ReminderStoring {
     let eventStore = EKEventStore()
 
-    func requestAccess() async throws -> Bool { try await eventStore.requestFullAccessToReminders() }
+    func requestAccess() async throws -> Bool {
+        switch EKEventStore.authorizationStatus(for: .reminder) {
+        case .fullAccess:
+            return true
+        case .notDetermined:
+            return try await eventStore.requestFullAccessToReminders()
+        default:
+            return false
+        }
+    }
     func calendars() -> [EKCalendar] { eventStore.calendars(for: .reminder) }
     func defaultCalendar() -> EKCalendar? { eventStore.defaultCalendarForNewReminders() }
     func save(_ reminder: EKReminder) throws { try eventStore.save(reminder, commit: true) }
@@ -103,7 +112,6 @@ final class ReminderService {
 
     func find(query: String, dueDate: String?, listName: String?, includeCompleted: Bool) async throws -> ReminderSearchResult {
         let search = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !search.isEmpty else { throw SearchError.query }
         NSLog("미리 알림 조회 권한 확인 시작")
         guard try await store.requestAccess() else { throw SaveError.permission }
         NSLog("미리 알림 조회 권한 확인 완료")
@@ -127,7 +135,7 @@ final class ReminderService {
                     return
                 }
                 let matches = reminders.filter { reminder in
-                    guard reminder.title.localizedCaseInsensitiveContains(search),
+                    guard (search.isEmpty || reminder.title.localizedCaseInsensitiveContains(search)),
                           includeCompleted || !reminder.isCompleted else { return false }
                     if let dueDate {
                         let parts = reminder.dueDateComponents
@@ -161,11 +169,10 @@ final class ReminderService {
     }
 
     enum SearchError: LocalizedError {
-        case query, fetch
+        case fetch
 
         var errorDescription: String? {
             switch self {
-            case .query: "검색어를 입력해 주세요."
             case .fetch: "미리 알림 목록을 불러오지 못했습니다."
             }
         }
@@ -304,11 +311,25 @@ final class ReminderService {
         case 6...9: priority = "low"
         default: priority = nil
         }
-        let fields = [identifier, reminder.title ?? "", dueDate ?? "", dueTime ?? "", reminder.calendar.title,
-                      reminder.calendar.calendarIdentifier, reminder.notes ?? "", reminder.url?.absoluteString ?? "",
-                      frequency ?? "", priority ?? "", String(reminder.isCompleted),
-                      String(reminder.priority), String(reminder.lastModifiedDate?.timeIntervalSince1970 ?? 0),
-                      String(reminder.recurrenceRules?.count ?? 0)]
+        guard let calendar = reminder.calendar else { throw SaveError.list }
+        let modifiedAt = reminder.lastModifiedDate?.timeIntervalSince1970 ?? 0
+        let recurrenceCount = reminder.recurrenceRules?.count ?? 0
+        let fields: [String] = [
+            identifier,
+            reminder.title ?? "",
+            dueDate ?? "",
+            dueTime ?? "",
+            calendar.title,
+            calendar.calendarIdentifier,
+            reminder.notes ?? "",
+            reminder.url?.absoluteString ?? "",
+            frequency ?? "",
+            priority ?? "",
+            String(reminder.isCompleted),
+            String(reminder.priority),
+            String(modifiedAt),
+            String(recurrenceCount)
+        ]
         let digest = SHA256.hash(data: Data(fields.joined(separator: "\u{001f}").utf8))
         let revision = digest.map { String(format: "%02x", $0) }.joined()
         return ReminderSnapshot(identifier: identifier, title: reminder.title, dueDate: dueDate, dueTime: dueTime,

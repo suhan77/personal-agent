@@ -75,9 +75,10 @@ def create_file(
     working_directory: Annotated[str, InjectedState("working_directory")],
     content: str = "",
 ) -> str:
-    """사용자 승인 후 새 파일을 현재 작업 디렉터리에 만든다.
+    """사용자가 새 텍스트 파일의 생성을 요청했을 때 승인 후 파일을 만든다.
 
-    path는 현재 작업 디렉터리 기준 상대 경로다. 기존 파일은 덮어쓰지 않는다.
+    path는 현재 작업 디렉터리 기준 상대 경로이며 상위 폴더가 이미 있어야 한다.
+    기존 파일은 덮어쓰지 않는다.
     """
     if not isinstance(working_directory, str) or not working_directory.strip():
         raise ValueError("Working directory is required")

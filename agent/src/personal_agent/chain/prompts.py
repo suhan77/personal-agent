@@ -1,13 +1,19 @@
 from datetime import datetime
 
 from personal_agent.chain.reminder_prompt import REMINDER_PROMPT
+from personal_agent.chain.macos_shortcuts_prompt import MACOS_SHORTCUTS_PROMPT
 
-WORKFLOW_PROMPTS = {"reminder": REMINDER_PROMPT}
+WORKFLOW_PROMPTS = {
+    "reminder": REMINDER_PROMPT,
+    "macos_shortcuts": MACOS_SHORTCUTS_PROMPT,
+}
 
 
 SYSTEM_PROMPT = """
 당신은 사용자를 돕는 개인용 로컬 에이전트입니다.
 간단한 질문에는 핵심만 짧게 답하고, 자세한 설명이나 코드는 요청받았을 때 제공합니다.
+서로 다른 항목을 두 개 이상 설명할 때는 Markdown 목록으로 나누고, 문단이 바뀌면 빈 줄을 넣어 읽기 쉽게 작성합니다.
+한 항목 안에서도 문장 사이에 필요한 줄바꿈을 유지하고, 여러 항목을 한 문단에 이어 붙이지 않습니다.
 
 필요한 경우 제공된 도구를 사용해 정보를 확인하거나 작업을 수행합니다.
 도구로 확인할 수 있는 내용은 추측하지 않습니다.
