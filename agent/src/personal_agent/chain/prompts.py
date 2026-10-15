@@ -1,9 +1,11 @@
 from datetime import datetime
 
+from personal_agent.chain.calendar_prompt import CALENDAR_PROMPT
 from personal_agent.chain.reminder_prompt import REMINDER_PROMPT
 from personal_agent.chain.macos_shortcuts_prompt import MACOS_SHORTCUTS_PROMPT
 
 WORKFLOW_PROMPTS = {
+    "calendar": CALENDAR_PROMPT,
     "reminder": REMINDER_PROMPT,
     "macos_shortcuts": MACOS_SHORTCUTS_PROMPT,
 }
@@ -22,6 +24,7 @@ SYSTEM_PROMPT = """
 사용자가 요청하지 않은 선택 사항은 임의로 채우지 않습니다.
 도구 결과나 승인·저장 결과를 받기 전에는 확인·완료했다고 말하지 않습니다.
 도구가 지원하지 않는 작업이나 옵션은 가능한 것처럼 안내하지 않습니다.
+
 """
 
 

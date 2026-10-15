@@ -1,6 +1,26 @@
 import Foundation
 import AppKit
 
+enum ChatModel: String, CaseIterable, Identifiable {
+    case granite
+    case gpt6Luna = "gpt-6-luna"
+
+    var id: String { rawValue }
+    var title: String {
+        switch self {
+        case .granite: "Granite"
+        case .gpt6Luna: "GPT-6 Luna"
+        }
+    }
+    var menuTitle: String {
+        switch self {
+        case .granite: "Granite · 로컬"
+        case .gpt6Luna: "GPT-6 Luna · API (연결 예정)"
+        }
+    }
+    var isAvailable: Bool { self == .granite }
+}
+
 @MainActor
 final class ChatStore: ObservableObject {
     @Published private(set) var conversations: [Conversation]
@@ -8,6 +28,12 @@ final class ChatStore: ObservableObject {
     @Published private(set) var workingDirectory: URL?
     @Published var draft = ""
     @Published private(set) var isGeneratingReply = false
+    @Published private(set) var selectedModel: ChatModel = .granite
+
+    func selectModel(_ model: ChatModel) {
+        guard model.isAvailable, !isGeneratingReply else { return }
+        selectedModel = model
+    }
 
     private let agent = AgentProcessService()
     private let reminders = ReminderService()

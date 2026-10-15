@@ -397,6 +397,32 @@ private struct Composer: View {
             .clipShape(Circle())
             .disabled(chatStore.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || chatStore.isGeneratingReply)
             .help("메시지 보내기")
+
+            Menu {
+                ForEach(ChatModel.allCases) { model in
+                    Button {
+                        chatStore.selectModel(model)
+                    } label: {
+                        if model == chatStore.selectedModel {
+                            Label(model.menuTitle, systemImage: "checkmark")
+                        } else {
+                            Text(model.menuTitle)
+                        }
+                    }
+                    .disabled(!model.isAvailable)
+                }
+            } label: {
+                Text(chatStore.selectedModel.title)
+                    .font(.callout)
+                    .lineLimit(1)
+                    .padding(.vertical, 5)
+            }
+            .menuStyle(.borderedButton)
+            .fixedSize()
+            .disabled(chatStore.isGeneratingReply)
+            .accessibilityLabel("모델 선택")
+            .accessibilityValue(chatStore.selectedModel.title)
+            .help("답변에 사용할 모델 선택")
         }
         .padding(16)
         .background(.bar)

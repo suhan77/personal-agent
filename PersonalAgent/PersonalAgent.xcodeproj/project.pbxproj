@@ -15,6 +15,7 @@
 		A10000000000000000000006 /* ConversationSidebar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000006 /* ConversationSidebar.swift */; };
 		A10000000000000000000008 /* Services/AgentProcessService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000008 /* Services/AgentProcessService.swift */; };
 		A1000000000000000000000C /* Services/ReminderService.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000000000000000000000C /* Services/ReminderService.swift */; };
+		A1000000000000000000000F = {isa = PBXBuildFile; fileRef = A2000000000000000000000F; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -28,6 +29,7 @@
 		A20000000000000000000007 /* PersonalAgent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PersonalAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000008 /* Services/AgentProcessService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/AgentProcessService.swift; sourceTree = "<group>"; };
 		A2000000000000000000000C /* Services/ReminderService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/ReminderService.swift; sourceTree = "<group>"; };
+		A2000000000000000000000F = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Services/CalendarService.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -55,6 +57,7 @@
 			children = (
 				A20000000000000000000008 /* Services/AgentProcessService.swift */,
 				A2000000000000000000000C /* Services/ReminderService.swift */,
+                A2000000000000000000000F,
 				A40000000000000000000004 /* App */,
 				A40000000000000000000005 /* Features */,
 				A40000000000000000000006 /* Models */,
@@ -184,6 +187,7 @@
 			files = (
 				A10000000000000000000008 /* Services/AgentProcessService.swift in Sources */,
 				A1000000000000000000000C /* Services/ReminderService.swift in Sources */,
+                A1000000000000000000000F,
 				A10000000000000000000001 /* PersonalAgentApp.swift in Sources */,
 				A10000000000000000000002 /* ContentView.swift in Sources */,
 				A10000000000000000000003 /* ChatMessage.swift in Sources */,
@@ -292,7 +296,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Personal Agent";
-				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "승인한 미리 알림을 macOS 미리 알림 앱에 저장합니다.";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "캘린더 일정을 조회하고 승인한 일정을 생성·수정합니다.";
+                INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "승인한 미리 알림을 macOS 미리 알림 앱에 저장합니다.";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;
@@ -317,7 +322,8 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Personal Agent";
-				INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "승인한 미리 알림을 macOS 미리 알림 앱에 저장합니다.";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "캘린더 일정을 조회하고 승인한 일정을 생성·수정합니다.";
+                INFOPLIST_KEY_NSRemindersFullAccessUsageDescription = "승인한 미리 알림을 macOS 미리 알림 앱에 저장합니다.";
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.productivity";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 15.0;

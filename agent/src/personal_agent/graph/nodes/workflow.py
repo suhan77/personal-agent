@@ -25,7 +25,18 @@ def select_workflow(state: AgentState) -> dict[str, str | None]:
         return {}
     if state.get("active_workflow") == "reminder" and any(word in message for word in CANCEL_WORDS):
         return {"active_workflow": None}
+    if state.get("active_workflow") == "calendar" and any(word in message for word in CANCEL_WORDS):
+        return {"active_workflow": None}
     normalized = message.casefold()
+    if any(word in normalized for word in ("캘린더", "일정", "calendar")):
+        return {"active_workflow": "calendar"}
+    if state.get("active_workflow") == "calendar":
+        # Keep short follow-ups such as “7시까지” in the calendar workflow.
+        if not any(name in message for name in REMINDER_NAMES) and any(
+            word in normalized for word in ("시", "분", "까지", "시간", "회의", "장소", "메모", "그거", "그 일정", "내일", "오늘", "모레")
+        ):
+            return {}
+        return {"active_workflow": None}
     if (any(name in normalized for name in SHORTCUT_TERMS)
             and not any(term in normalized for term in SHORTCUT_DESIGN_TERMS)):
         return {"active_workflow": "macos_shortcuts"}

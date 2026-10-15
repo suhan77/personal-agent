@@ -11,14 +11,7 @@ final class AgentProcessService {
     private var requestID: String?
     private var timeout: Task<Void, Never>?
     private let reminders = ReminderService()
-
-    private struct ReminderLookupArguments: Decodable {
-        let query: String?
-        let due_date: String?
-        let list_name: String?
-        let include_completed: Bool?
-        let identifier: String?
-    }
+    private let calendar = CalendarService()
 
     private struct Reply: Decodable {
         let id: String?
@@ -32,7 +25,7 @@ final class AgentProcessService {
         let reminder_update: ReminderUpdateProposal?
         let tool: String?
         let call_id: String?
-        let arguments: ReminderLookupArguments?
+        let arguments: CalendarToolArguments?
     }
 
     enum AgentResult {
@@ -85,11 +78,13 @@ final class AgentProcessService {
     }
 
     private enum NativeResult: Encodable {
+        case calendar(CalendarToolResult)
         case search(ReminderSearchResult)
         case snapshot(ReminderSnapshot)
 
         func encode(to encoder: Encoder) throws {
             switch self {
+            case .calendar(let value): try value.encode(to: encoder)
             case .search(let value): try value.encode(to: encoder)
             case .snapshot(let value): try value.encode(to: encoder)
             }
@@ -297,7 +292,14 @@ final class AgentProcessService {
         Task { [weak self] in
             guard let self else { return }
             let response: NativeToolResult
-            if reply.tool == "find_reminders", let arguments = reply.arguments, let query = arguments.query {
+            if let tool = reply.tool, ["find_calendar_events", "create_calendar_event", "update_calendar_event"].contains(tool), let arguments = reply.arguments {
+                do {
+                    let result = try await calendar.handle(tool: tool, arguments: arguments, isActive: { self.requestID == parentID })
+                    response = NativeToolResult(id: parentID, call_id: callID, result: .calendar(result), error: nil)
+                } catch {
+                    response = NativeToolResult(id: parentID, call_id: callID, result: nil, error: error.localizedDescription)
+                }
+            } else if reply.tool == "find_reminders", let arguments = reply.arguments, let query = arguments.query {
                 do {
                     let items = try await reminders.find(query: query, dueDate: arguments.due_date,
                                                          listName: arguments.list_name,

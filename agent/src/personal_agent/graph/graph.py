@@ -19,6 +19,7 @@ from personal_agent.tools.reminder_search import find_reminders
 from personal_agent.tools.reminder_update import propose_update_reminder
 from personal_agent.tools.reminder_delete import propose_delete_reminder
 from personal_agent.tools.macos_shortcuts import get_macos_shortcuts
+from personal_agent.tools.calendar import find_calendar_events, create_calendar_event, update_calendar_event
 
 
 def build_agent_graph(
@@ -27,7 +28,7 @@ def build_agent_graph(
 ) -> CompiledStateGraph:
     web_search = create_web_search_tool()
     tools = [list_directory, read_file, web_search, create_file, update_file, propose_reminder,
-             find_reminders, propose_update_reminder, propose_delete_reminder, get_macos_shortcuts]
+             find_reminders, propose_update_reminder, propose_delete_reminder, get_macos_shortcuts, find_calendar_events, create_calendar_event, update_calendar_event]
     generation_node = GenerationNode(models, tools)
     history_summarization_node = HistorySummarizationNode(models)
 
@@ -36,7 +37,7 @@ def build_agent_graph(
     graph.add_node("summarize_history", history_summarization_node.run)
     graph.add_node("generate", generation_node.run)
     graph.add_node("tools", ToolNode(
-        [list_directory, read_file, web_search, find_reminders, get_macos_shortcuts],
+        [list_directory, read_file, web_search, find_reminders, get_macos_shortcuts, find_calendar_events, create_calendar_event, update_calendar_event],
         handle_tool_errors=(RuntimeError, TimeoutError, ValueError, FileNotFoundError, NotADirectoryError),
     ))
     graph.add_node("review_file_change", review_file_change)
