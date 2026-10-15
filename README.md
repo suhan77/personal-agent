@@ -6,7 +6,7 @@ SwiftUI 화면과 로컬 Python 에이전트를 하나의 저장소에서 관리
 
 | 기능 | 제공 내용 | 승인·제한 |
 | --- | --- | --- |
-| AI 채팅 | Granite 로컬 / GPT-6 Luna API 선택, SQLite 대화 이력 및 장기 대화 요약, Swift 대화 목록 저장·복원 | 대화 삭제 시 Python 체크포인트도 삭제 |
+| AI 채팅 | Granite MLX (BF16) / GPT-6 Luna API 선택, SQLite 대화 이력 및 장기 대화 요약, Swift 대화 목록 저장·복원 | 대화 삭제 시 Python 체크포인트도 삭제 |
 | 작업 폴더와 파일 | macOS에서 작업 폴더 선택, 파일·하위 폴더 목록 조회, UTF-8 텍스트 파일 읽기·생성·수정 | 파일 생성·수정은 변경안 확인 후 승인 필요 |
 | 웹 검색 | DuckDuckGo 검색 결과 조회 | 검색 서비스 상태에 따라 결과가 없거나 실패할 수 있음 |
 | macOS 단축키 | 공통 및 Finder·Spotlight·텍스트 편집별 Markdown 카탈로그에서 관련 항목 안내 | 앱·macOS 버전·키보드 배열 설정에 따라 다를 수 있음 |
@@ -28,12 +28,36 @@ macOS 권한이 빌드마다 초기화되지 않도록 Debug 빌드는 `Personal
    cp .env.example .env
    ```
 
-3. 로컬 Granite를 사용할 경우 `agent/.env`의 `MODEL_DIR`를 확인합니다. 기본값은 `/Volumes/sh_disk/model`이며 그 아래 `granite-4.2-3b` 모델 파일이 있어야 합니다. 모델은 자동으로 내려받지 않고 로컬 파일만 읽습니다. 추론에는 Apple Silicon의 MPS를 사용합니다.
+3. 로컬 Granite를 사용할 경우 `agent/.env`의 `MODEL_DIR`를 확인합니다. 기본값은 `/Volumes/sh_disk/model`이며 그 아래 `granite-4.2-3b-bf16-mlx` 모델 파일이 있어야 합니다. 모델은 자동으로 내려받지 않고 로컬 파일만 읽습니다. 추론에는 Apple Silicon의 MLX를 사용합니다.
 4. `PersonalAgent/PersonalAgent.xcodeproj`를 Xcode에서 열고 `PersonalAgent` / `My Mac`으로 실행합니다.
 
 앱을 실행하면 백그라운드에서 Python 워커, 그래프 및 체크포인트 저장소를 미리 준비합니다. 모델은 선택한 모델의 첫 요청에서 초기화하고 이후에는 재사용합니다. GPT-6 Luna를 선택하면 Granite 가중치를 불러오지 않습니다. 초기화 중 입력된 첫 메시지는 워커가 준비될 때까지 대기한 뒤 처리됩니다. 이후에는 같은 Python 프로세스와 모델을 재사용합니다. 오류는 대화창에 표시하며 자세한 로그는 Xcode 콘솔에서 확인합니다. 10분 동안 응답이 없으면 프로세스를 종료하며 다음 요청에서 다시 시작합니다.
 
 Python 워커만 실행하려면 `agent` 폴더에서 `uv run python -m personal_agent`를 사용합니다. 이 경우 아래 JSON Lines 프로토콜로 표준입출력을 직접 연결해야 합니다. 미리 알림 조회·승인처럼 macOS 기능을 사용하는 요청에는 Swift의 응답도 필요합니다.
+
+## Granite MLX (BF16)
+
+로컬 Granite 4.2 3B는 MLX 엔진으로 실행합니다. 앱 모델 메뉴에서 **Granite · MLX (BF16)**를 선택합니다. 기존 `granite` 모델 ID와 과거 `granite-mlx` ID는 모두 MLX로 연결되므로 저장된 대화도 이어서 사용할 수 있습니다.
+
+먼저 `agent` 폴더에서 `uv sync`를 실행하고, `MODEL_DIR` 아래에 IBM 공식 MLX 모델을 내려받습니다. 아래 예시는 `MODEL_DIR`가 `$HOME/models`인 경우입니다.
+
+```bash
+uv run hf download ibm-granite/granite-4.2-3b-bf16-mlx \
+  --local-dir "$HOME/models/granite-4.2-3b-bf16-mlx"
+```
+
+MLX 모델은 선택 후 첫 요청에서 로드하고, 이후 재사용합니다. 앱 실행 중에는 자동 다운로드하지 않습니다. 기존 Granite의 대화 템플릿과 도구 호출 파서를 공유하며 thinking은 끈 상태를 유지합니다. GPU 작업은 모델을 로드한 전용 스레드에서 순서대로 실행합니다. 이 버전에는 양자화나 요청 간 프롬프트 캐시 재사용을 적용하지 않았습니다.
+
+로컬 모델 추론 시간을 측정하려면 저장소 루트에서 아래 명령을 실행합니다. 실제 도구나 캘린더 저장은 실행하지 않습니다.
+
+```bash
+agent/.venv/bin/python agent/scripts/benchmark_granite.py \
+  --model granite --repeat 2 --output /tmp/granite-mlx-benchmark.json
+```
+
+측정은 BF16, thinking 비활성화, greedy 생성, 최대 256토큰을 사용합니다. 결과에는 실제 응답·도구 호출, 전체 추론 시간과 생성 속도를 기록합니다. 입력 및 생성 속도는 MLX 엔진이 제공하는 측정값입니다. 반복 실행은 모델·커널이 준비된 상태의 영향을 받을 수 있고, 서로 다른 길이의 응답은 전체 시간만으로 비교하지 않습니다. 앱의 기본 샘플링 설정은 비교용 greedy 설정으로 바꾸지 않습니다.
+
+M2 Pro / 메모리 32GB에서 두 번째 실행 기준으로 짧은 인사는 PyTorch 1.37초 → MLX 0.93초, 캘린더 도구 호출 생성은 9.25초 → 6.06초였습니다. 첫 실행의 준비 비용과 출력 길이에 따라 달라지며, 일정 생성 전체 처리 시간을 뜻하지 않습니다. [측정 조건과 원본 결과](docs/benchmarks/README.md)를 참고하세요.
 
 ## OpenAI API 설정
 
@@ -110,7 +134,7 @@ DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer xcodebuild \
   -derivedDataPath /tmp/personal-agent-derived build CODE_SIGNING_ALLOWED=NO
 ```
 
-Xcode 실행 시 앱용 Metal 검사 및 라이브러리 주입 환경 변수는 Python 프로세스에 전달하지 않습니다. PyTorch MPS가 Xcode의 Metal 검사 계층에서 강제 종료되는 것을 방지하며, Swift 앱 자체의 디버그 설정은 그대로 유지합니다.
+Xcode 실행 시 앱용 Metal 검사 및 라이브러리 주입 환경 변수는 Python 프로세스에 전달하지 않습니다. Python의 MLX 실행 환경을 앱 디버깅 설정과 분리하며, Swift 앱 자체의 디버그 설정은 그대로 유지합니다.
 
 ## 소요 시간 로그
 

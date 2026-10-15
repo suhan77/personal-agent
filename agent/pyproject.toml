@@ -5,22 +5,20 @@ build-backend = "hatchling.build"
 [project]
 name = "personal-agent-agent"
 version = "0.1.0"
-description = "Local Hugging Face agent called directly by Swift"
+description = "Local MLX and OpenAI agent called directly by Swift"
 requires-python = "==3.13.*"
 dependencies = [
-    "accelerate>=1.15.0",
     "aiosqlite>=0.22.1",
     "ddgs>=9.16.0",
     "langchain-community>=0.4.2",
     "langchain-core>=1.0",
     "langchain-openai>=1.6.6",
-    "langchain-huggingface>=1.2.2",
     "langgraph>=1.2.11",
     "langgraph-checkpoint-sqlite>=3.1.1",
     "langmem>=0.0.30",
+    "mlx-lm>=0.32.0; sys_platform == 'darwin' and platform_machine == 'arm64'",
     "pydantic>=2.0",
     "pydantic-settings>=2.15.0",
-    "torch>=2.14.0",
     "transformers>=5.17.0",
 ]
 

@@ -8,7 +8,6 @@ from uuid import uuid4
 
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
-from langchain_core.outputs import Generation, LLMResult
 from langchain_community.utilities.duckduckgo_search import DuckDuckGoSearchAPIWrapper
 from pydantic import PrivateAttr
 from personal_agent.__main__ import serve
@@ -16,7 +15,7 @@ from personal_agent.services.chat_service import AgentService
 from personal_agent.services.review_service import ReviewService
 from personal_agent.config.settings import Settings
 from personal_agent.graph.checkpoint import open_checkpointer
-from personal_agent.llm.granite.chat_model import GraniteChatModel
+from personal_agent.llm.granite.prompt import GranitePromptMixin
 from personal_agent.llm.granite.tool_call_parser import parse_tool_calls
 from personal_agent.llm.granite.llm_config import GraniteLLMConfig
 from personal_agent.schemas.agent import AgentRequest
@@ -437,22 +436,6 @@ class ToolCallParserTests(unittest.TestCase):
             {"path": "README.md", "limit": 10},
         )
 
-    def test_model_result_contains_tool_calls(self):
-        result = GraniteChatModel._to_chat_result(
-            LLMResult(
-                generations=[[
-                    Generation(
-                        text="<tool_call>\n<function=list_directory>\n</function>\n</tool_call>"
-                    )
-                ]]
-            )
-        )
-
-        message = result.generations[0].message
-        self.assertEqual(message.content, "")
-        self.assertEqual(message.tool_calls[0]["name"], "list_directory")
-        self.assertEqual(message.tool_calls[0]["args"], {})
-
     def test_converts_tool_messages_for_granite(self):
         tool_call = AIMessage(
             content="",
@@ -464,11 +447,11 @@ class ToolCallParserTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            GraniteChatModel._to_chatml_format(tool_call)["tool_calls"],
+            GranitePromptMixin._to_chatml_format(tool_call)["tool_calls"],
             [{"function": {"name": "list_directory", "arguments": {}}}],
         )
         self.assertEqual(
-            GraniteChatModel._to_chatml_format(tool_result),
+            GranitePromptMixin._to_chatml_format(tool_result),
             {"role": "tool", "content": '[{"name": "test", "type": "file"}]'},
         )
 

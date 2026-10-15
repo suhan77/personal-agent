@@ -1,0 +1,74 @@
+{
+  "model": "granite-mlx",
+  "load_seconds": 3.551181707996875,
+  "precision": "bf16",
+  "thinking": false,
+  "sampling": "greedy",
+  "max_tokens": 256,
+  "results": [
+    {
+      "case": "chat",
+      "iteration": 1,
+      "seconds": 2.347279916983098,
+      "input_tokens": 424,
+      "output_tokens": 7,
+      "prompt_tps": 211.06996410445473,
+      "generation_tps": 28.308925795457935,
+      "content": "안녕하세요!",
+      "tool_calls": []
+    },
+    {
+      "case": "chat",
+      "iteration": 2,
+      "seconds": 0.9272768749797251,
+      "input_tokens": 424,
+      "output_tokens": 7,
+      "prompt_tps": 630.6867398369776,
+      "generation_tps": 28.703013376893736,
+      "content": "안녕하세요!",
+      "tool_calls": []
+    },
+    {
+      "case": "calendar",
+      "iteration": 1,
+      "seconds": 6.1878933340194635,
+      "input_tokens": 2157,
+      "output_tokens": 74,
+      "prompt_tps": 693.9663494701758,
+      "generation_tps": 24.141870350999763,
+      "content": "",
+      "tool_calls": [
+        {
+          "name": "find_calendar_events",
+          "args": {
+            "start": "2026-10-15T18:00:00+09:00",
+            "end": "2026-10-15T19:00:00+09:00"
+          },
+          "id": "call_ef89c80d020e48e48b67da9dc092902c",
+          "type": "tool_call"
+        }
+      ]
+    },
+    {
+      "case": "calendar",
+      "iteration": 2,
+      "seconds": 6.0555340420105495,
+      "input_tokens": 2157,
+      "output_tokens": 74,
+      "prompt_tps": 723.5620891189252,
+      "generation_tps": 24.17623297977487,
+      "content": "",
+      "tool_calls": [
+        {
+          "name": "find_calendar_events",
+          "args": {
+            "start": "2026-10-15T18:00:00+09:00",
+            "end": "2026-10-15T19:00:00+09:00"
+          },
+          "id": "call_67d09edcab604822850872f418c8c8e3",
+          "type": "tool_call"
+        }
+      ]
+    }
+  ]
+}

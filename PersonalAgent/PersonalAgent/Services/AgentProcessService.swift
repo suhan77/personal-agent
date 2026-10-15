@@ -222,7 +222,7 @@ final class AgentProcessService {
         child.arguments = ["-u", "-m", "personal_agent"]
         child.currentDirectoryURL = agentRoot
         // Xcode's injected libraries and Metal validation are for the Swift app.
-        // Inheriting them can abort PyTorch MPS kernels in the Python worker.
+        // Keep the Python MLX runtime independent of Xcode instrumentation.
         var childEnvironment = environment.filter { key, _ in
             !["DYLD_", "MTL_", "METAL_", "__XCODE_"].contains { key.hasPrefix($0) }
         }

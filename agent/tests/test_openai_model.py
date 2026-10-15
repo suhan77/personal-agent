@@ -1,15 +1,17 @@
 import json
+from pathlib import Path
 import tempfile
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 import httpx
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
+from openai import AuthenticationError
+
 from personal_agent.config.settings import Settings
 from personal_agent.graph.checkpoint import open_checkpointer
-from personal_agent.llm.define_llm import ChatModelName
+from personal_agent.llm.define_llm import ChatModelName, ModelParameters
 from personal_agent.llm.registry_llm import ChatModels
 from personal_agent.schemas.agent import AgentRequest
 from personal_agent.services.chat_service import AgentService
@@ -30,7 +32,7 @@ class OpenAIModelTests(unittest.IsolatedAsyncioTestCase):
         return Settings(openai_api_key=key, _env_file=None)
 
     def test_lazy_initialization_and_missing_key(self):
-        with patch("personal_agent.llm.granite.chat_model.GraniteChatModel.from_settings") as local:
+        with patch("personal_agent.llm.granite.mlx_chat_model.GraniteMLXChatModel.from_settings") as local:
             models = ChatModels(self.settings())
             self.assertEqual(models._models, {})
             with self.assertRaisesRegex(ValueError, "OPENAI_API_KEY"):
@@ -68,7 +70,6 @@ class OpenAIModelTests(unittest.IsolatedAsyncioTestCase):
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
             models = ChatModels(self.settings("test-key"))
             models._models[ChatModelName.GPT6_LUNA] = ChatOpenAI(model="gpt-6-luna", api_key="test-key", reasoning_effort="none", use_responses_api=False, http_async_client=client)
-            from personal_agent.llm.define_llm import ModelParameters
             models._parameters[ChatModelName.GPT6_LUNA] = ModelParameters(context_window=16384, max_new_tokens=2048, summary_max_new_tokens=256)
             bridge = None
             def emit(payload):
@@ -92,6 +93,5 @@ class OpenAIModelTests(unittest.IsolatedAsyncioTestCase):
             return httpx.Response(401, json={"error": {"message": "Invalid API key", "type": "authentication_error", "code": "invalid_api_key"}})
         async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
             model = ChatOpenAI(model="gpt-6-luna", api_key="test-key", reasoning_effort="none", http_async_client=client, max_retries=0)
-            from openai import AuthenticationError
             with self.assertRaises(AuthenticationError):
                 await model.ainvoke([HumanMessage(content="안녕")])

@@ -2,9 +2,11 @@ from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
+from langchain_openai import ChatOpenAI
 
 from personal_agent.config.settings import Settings
 from personal_agent.llm.define_llm import ChatModelName, ModelParameters
+from personal_agent.llm.granite.mlx_chat_model import GraniteMLXChatModel
 
 
 class ChatModels:
@@ -18,14 +20,12 @@ class ChatModels:
     def get(self, name: ChatModelName):
         if name not in self._models:
             if name == ChatModelName.GRANITE:
-                from personal_agent.llm.granite.chat_model import GraniteChatModel
-                model, config = GraniteChatModel.from_settings(self._settings)
+                model, config = GraniteMLXChatModel.from_settings(self._settings)
                 self._models[name] = model
                 self._parameters[name] = config.parameters
             elif name == ChatModelName.GPT6_LUNA:
                 if not self._settings.openai_api_key or not self._settings.openai_api_key.get_secret_value().strip():
                     raise ValueError("OpenAI API 키가 없습니다. agent/.env에 OPENAI_API_KEY를 설정한 뒤 앱을 다시 실행하세요.")
-                from langchain_openai import ChatOpenAI
                 self._models[name] = ChatOpenAI(
                     model=name.value,
                     api_key=self._settings.openai_api_key,

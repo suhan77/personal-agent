@@ -13,6 +13,7 @@ from pydantic import PrivateAttr
 
 from personal_agent.__main__ import serve
 from personal_agent.graph.checkpoint import open_checkpointer
+from personal_agent.llm.granite.llm_config import GraniteLLMConfig
 from personal_agent.schemas.agent import AgentRequest
 from personal_agent.services.chat_service import AgentService
 from personal_agent.services.native_tool_bridge import NativeToolBridge, call_native_tool, native_tool_context
@@ -47,7 +48,6 @@ class ReminderSearchModels:
         return self.model
 
     def get_summary_model(self):
-        from personal_agent.llm.granite.llm_config import GraniteLLMConfig
         return self.model, GraniteLLMConfig().parameters
 
 

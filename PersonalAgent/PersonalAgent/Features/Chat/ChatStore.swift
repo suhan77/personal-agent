@@ -8,13 +8,13 @@ enum ChatModel: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .granite: "Granite"
+        case .granite: "Granite MLX"
         case .gpt6Luna: "GPT-6 Luna"
         }
     }
     var menuTitle: String {
         switch self {
-        case .granite: "Granite · 로컬"
+        case .granite: "Granite · MLX (BF16)"
         case .gpt6Luna: "GPT-6 Luna · API"
         }
     }

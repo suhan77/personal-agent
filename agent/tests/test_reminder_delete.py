@@ -10,11 +10,12 @@ from pydantic import PrivateAttr, ValidationError
 
 from personal_agent.graph.checkpoint import open_checkpointer
 from personal_agent.graph.nodes.reminder_change_review import prepare_reminder_change
+from personal_agent.llm.granite.llm_config import GraniteLLMConfig
 from personal_agent.schemas.agent import AgentRequest
 from personal_agent.schemas.reminder_delete import ReminderDeleteRequest
 from personal_agent.services.chat_service import AgentService
-from personal_agent.services.review_service import ReviewService
 from personal_agent.services.native_tool_bridge import NativeToolBridge, native_tool_context
+from personal_agent.services.review_service import ReviewService
 from personal_agent.tools.reminder_delete import propose_delete_reminder
 
 
@@ -46,7 +47,6 @@ class DeletingModels:
         return self.model
 
     def get_summary_model(self):
-        from personal_agent.llm.granite.llm_config import GraniteLLMConfig
         return self.model, GraniteLLMConfig().parameters
 
 
