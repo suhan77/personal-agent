@@ -4,40 +4,62 @@ from langchain_core.runnables import Runnable
 from langchain_core.tools import BaseTool
 
 from personal_agent.config.settings import Settings
-from personal_agent.llm.granite.chat_model import GraniteChatModel
-from personal_agent.llm.huggingface_llm import LocalHuggingFaceChatModel
-from personal_agent.llm.define_llm import ChatModelName, HuggingFaceParameters
+from personal_agent.llm.define_llm import ChatModelName, ModelParameters
 
 
 class ChatModels:
-    """등록된 모델을 생성하고 이름으로 조회한다."""
+    """선택한 모델만 초기화하고 재사용한다."""
 
     def __init__(self, settings: Settings) -> None:
-        self._summary_model_name = ChatModelName.GRANITE
+        self._settings = settings
         self._models = {}
         self._parameters = {}
-        for name, build_model in {ChatModelName.GRANITE: GraniteChatModel.from_settings}.items():
-            model, config = build_model(settings)
-            self._models[name] = model
-            self._parameters[name] = config.parameters
 
-    def get(self, name: ChatModelName) -> LocalHuggingFaceChatModel:
+    def get(self, name: ChatModelName):
+        if name not in self._models:
+            if name == ChatModelName.GRANITE:
+                from personal_agent.llm.granite.chat_model import GraniteChatModel
+                model, config = GraniteChatModel.from_settings(self._settings)
+                self._models[name] = model
+                self._parameters[name] = config.parameters
+            elif name == ChatModelName.GPT6_LUNA:
+                if not self._settings.openai_api_key or not self._settings.openai_api_key.get_secret_value().strip():
+                    raise ValueError("OpenAI API 키가 없습니다. agent/.env에 OPENAI_API_KEY를 설정한 뒤 앱을 다시 실행하세요.")
+                from langchain_openai import ChatOpenAI
+                self._models[name] = ChatOpenAI(
+                    model=name.value,
+                    api_key=self._settings.openai_api_key,
+                    reasoning_effort="none",
+                    use_responses_api=False,
+                    max_completion_tokens=2048,
+                    timeout=60,
+                    max_retries=1,
+                )
+                # Bound history for latency and cost rather than filling the API context window.
+                self._parameters[name] = ModelParameters(
+                    context_window=16_384, max_new_tokens=2048, summary_max_new_tokens=256,
+                )
+            else:
+                raise ValueError(f"Unsupported model: {name}")
         return self._models[name]
 
-    def get_parameters(self, name: ChatModelName) -> HuggingFaceParameters:
+    def get_parameters(self, name: ChatModelName) -> ModelParameters:
+        self.get(name)
         return self._parameters[name]
 
-    def get_summary_model(self) -> tuple[Runnable[LanguageModelInput, AIMessage], HuggingFaceParameters]:
-        parameters = self.get_parameters(self._summary_model_name)
-        model = self.get_with_max_new_tokens(
-            self._summary_model_name, parameters.summary_max_new_tokens
-        )
-        return model, parameters
+    def get_summary_model(self, name: ChatModelName = ChatModelName.GRANITE) -> tuple[Runnable[LanguageModelInput, AIMessage], ModelParameters]:
+        parameters = self.get_parameters(name)
+        return self.get_with_max_new_tokens(name, parameters.summary_max_new_tokens), parameters
 
-    def get_with_max_new_tokens(
-        self, name: ChatModelName, max_new_tokens: int
-    ) -> Runnable[LanguageModelInput, AIMessage]:
-        return self.get(name).with_max_new_tokens(max_new_tokens)
+    def get_with_max_new_tokens(self, name: ChatModelName, max_new_tokens: int) -> Runnable:
+        model = self.get(name)
+        if name == ChatModelName.GRANITE:
+            return model.with_max_new_tokens(max_new_tokens)
+        return model.bind(max_completion_tokens=max_new_tokens)
 
     def get_with_tools(self, name: ChatModelName, tools: list[BaseTool]) -> Runnable:
-        return self.get(name).bind_tools(tools)
+        model = self.get(name)
+        if name == ChatModelName.GRANITE:
+            return model.bind_tools(tools)
+        # Existing proposal tools rely on omitted fields for partial updates.
+        return model.bind_tools(tools, strict=False, parallel_tool_calls=False)

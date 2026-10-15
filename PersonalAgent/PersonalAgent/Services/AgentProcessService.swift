@@ -40,6 +40,7 @@ final class AgentProcessService {
         let type = "generate_reply"
         let conversation_id: String
         let message: String
+        let model: String
         let working_directory: String?
     }
 
@@ -105,7 +106,7 @@ final class AgentProcessService {
     }
 
     /// Starts the persistent worker as soon as the app launches. Python then
-    /// performs its imports and model warm-up while the chat UI is idle.
+    /// prepares imports, graph, and storage while the chat UI is idle.
     func prewarm() {
         do {
             try startIfNeeded()
@@ -115,14 +116,18 @@ final class AgentProcessService {
         }
     }
 
-    func reply(to message: String, conversationID: UUID, workingDirectory: URL?) async throws -> AgentResult {
+    func reply(to message: String, conversationID: UUID, workingDirectory: URL?, model: String = "granite") async throws -> AgentResult {
         guard pending == nil else { throw AgentFailure(message: "답변 생성 중입니다.") }
+        if model == "gpt-6-luna", try APIKeyStore().load()?.isEmpty != false {
+            throw AgentFailure(message: "왼쪽 아래 설정에서 OpenAI API 키를 등록해 주세요.")
+        }
         try startIfNeeded()
         let id = UUID().uuidString
         var data = try JSONEncoder().encode(Request(
             id: id,
             conversation_id: conversationID.uuidString,
             message: message,
+            model: model,
             working_directory: workingDirectory?.path
         ))
         data.append(0x0A)
@@ -224,6 +229,8 @@ final class AgentProcessService {
         childEnvironment["MTL_DEBUG_LAYER"] = "0"
         childEnvironment["PYTHONPATH"] = agentRoot.appendingPathComponent("src").path
         childEnvironment["HF_HUB_OFFLINE"] = "1"
+        // Override inherited/.env credentials so deleting the app key cannot use a stale key.
+        childEnvironment["OPENAI_API_KEY"] = try APIKeyStore().load() ?? ""
         child.environment = childEnvironment
         child.standardInput = stdin
         child.standardOutput = stdout

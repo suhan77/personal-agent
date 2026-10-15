@@ -56,7 +56,7 @@ private struct MessageList: View {
                         HStack(spacing: 8) {
                             ProgressView()
                                 .controlSize(.small)
-                            Text("로컬 모델이 답변을 준비하고 있습니다…")
+                            Text("답변을 준비하고 있습니다…")
                                 .foregroundStyle(.secondary)
                             Spacer()
                         }

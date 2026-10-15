@@ -53,6 +53,10 @@ class GenerationNode:
             ])
             if self._unexecuted_calendar_action(response):
                 response = AIMessage(content="캘린더 도구가 호출되지 않아 일정을 변경하지 못했습니다. 제목과 시작·종료 시각을 포함해 다시 요청해 주세요.")
+        if getattr(response, "usage_metadata", None):
+            usage = response.usage_metadata
+            logger.info("모델 토큰 사용 | model=%s | 입력=%s | 출력=%s", state["model"],
+                        usage.get("input_tokens"), usage.get("output_tokens"))
         logger.info(LogMessages.MODEL_RAW_RESPONSE, response.content)
         tool_calls = getattr(response, "tool_calls", [])
         logger.info(

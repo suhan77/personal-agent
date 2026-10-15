@@ -15,10 +15,10 @@ enum ChatModel: String, CaseIterable, Identifiable {
     var menuTitle: String {
         switch self {
         case .granite: "Granite · 로컬"
-        case .gpt6Luna: "GPT-6 Luna · API (연결 예정)"
+        case .gpt6Luna: "GPT-6 Luna · API"
         }
     }
-    var isAvailable: Bool { self == .granite }
+    var isAvailable: Bool { true }
 }
 
 @MainActor
@@ -33,6 +33,19 @@ final class ChatStore: ObservableObject {
     func selectModel(_ model: ChatModel) {
         guard model.isAvailable, !isGeneratingReply else { return }
         selectedModel = model
+        UserDefaults.standard.set(model.rawValue, forKey: "selectedChatModel")
+    }
+
+    func saveOpenAIKey(_ key: String) throws {
+        guard !isGeneratingReply else { throw AgentProcessService.AgentFailure(message: "답변 생성이 끝난 뒤 다시 시도해 주세요.") }
+        try APIKeyStore().save(key)
+        agent.stop()
+    }
+
+    func deleteOpenAIKey() throws {
+        guard !isGeneratingReply else { throw AgentProcessService.AgentFailure(message: "답변 생성이 끝난 뒤 다시 시도해 주세요.") }
+        try APIKeyStore().delete()
+        agent.stop()
     }
 
     private let agent = AgentProcessService()
@@ -51,6 +64,7 @@ final class ChatStore: ObservableObject {
     func shutdown() { agent.stop() }
 
     init() {
+        selectedModel = ChatModel(rawValue: UserDefaults.standard.string(forKey: "selectedChatModel") ?? "") ?? .granite
         let applicationSupport = FileManager.default.urls(
             for: .applicationSupportDirectory,
             in: .userDomainMask
@@ -146,6 +160,7 @@ final class ChatStore: ObservableObject {
         }
         draft = ""
         save()
+        let model = selectedModel
         activeGenerationConversationID = conversationID
         isGeneratingReply = true
 
@@ -155,7 +170,8 @@ final class ChatStore: ObservableObject {
                 let result = try await self.agent.reply(
                     to: text,
                     conversationID: conversationID,
-                    workingDirectory: self.workingDirectory
+                    workingDirectory: self.workingDirectory,
+                    model: model.rawValue
                 )
                 self.appendResult(result, to: conversationID)
             } catch {
